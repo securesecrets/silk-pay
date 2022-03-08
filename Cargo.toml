@@ -1,8 +1,8 @@
 [package]
-name = "cw-sn-dex-aggregator"
+name = "cw-sn-silk-pay"
 version = "1.0.0"
-description = "DEX aggregator smart contract for the Secret network."
-repository = "https://github.com/btn-group/sn-dex-aggregator"
+description = "Secure Send/Receive smart contract for Secret Network."
+repository = "https://github.com/btn-group/silk-pay"
 authors = ["Steven Chang <steven.chang@btn.group>"]
 edition = "2018"
 
