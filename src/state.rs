@@ -3,6 +3,7 @@ use cosmwasm_std::{HumanAddr, StdResult, Storage, Uint128};
 use cosmwasm_storage::{singleton, singleton_read};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::collections::VecDeque;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -10,6 +11,7 @@ pub struct Config {
     pub buttcoin: SecretContract,
     pub butt_lode: SecretContract,
     pub initiator: HumanAddr,
+    pub registered_tokens: Option<HashMap<HumanAddr, String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

@@ -13,6 +13,7 @@ use cosmwasm_std::{
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
+use std::collections::HashMap;
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -24,6 +25,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         buttcoin: msg.buttcoin,
         butt_lode: msg.butt_lode,
         initiator: env.message.sender,
+        registered_tokens: None,
     };
     config_store.store(CONFIG_KEY, &config)?;
 
@@ -50,7 +52,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             amount,
         } => handle_hop(deps, &env, from, amount),
         HandleMsg::FinalizeRoute {} => finalize_route(deps, &env),
-        HandleMsg::RegisterTokens { tokens } => register_tokens(&env, tokens),
+        HandleMsg::RegisterTokens { tokens } => register_tokens(deps, &env, tokens),
     }
 }
 
@@ -358,19 +360,36 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-fn register_tokens(env: &Env, tokens: Vec<SecretContract>) -> StdResult<HandleResponse> {
+fn register_tokens<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    tokens: Vec<SecretContract>,
+) -> StdResult<HandleResponse> {
+    let mut config: Config = TypedStoreMut::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    let mut registered_tokens: HashMap<HumanAddr, String> = if config.registered_tokens.is_some() {
+        config.registered_tokens.unwrap()
+    } else {
+        HashMap::new()
+    };
     let mut messages = vec![];
     for token in tokens {
-        let address = token.address;
-        let contract_hash = token.contract_hash;
-        messages.push(snip20::register_receive_msg(
-            env.contract_code_hash.clone(),
-            None,
-            BLOCK_SIZE,
-            contract_hash.clone(),
-            address.clone(),
-        )?);
+        if !registered_tokens.contains_key(&token.address) {
+            let address = token.address;
+            let contract_hash = token.contract_hash;
+            messages.push(snip20::register_receive_msg(
+                env.contract_code_hash.clone(),
+                None,
+                BLOCK_SIZE,
+                contract_hash.clone(),
+                address.clone(),
+            )?);
+            registered_tokens.insert(address, contract_hash);
+        }
     }
+    config.registered_tokens = Some(registered_tokens);
+    TypedStoreMut::attach(&mut deps.storage).store(CONFIG_KEY, &config)?;
 
     Ok(HandleResponse {
         messages,
@@ -1193,6 +1212,13 @@ mod tests {
         let (_init_result, mut deps) = init_helper();
         let env = mock_env(mock_user_address(), &[]);
 
+        // when no tokens are sent in
+        let handle_msg = HandleMsg::RegisterTokens { tokens: vec![] };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        let handle_result_unwrapped = handle_result.unwrap();
+        // * no messages are sent
+        assert_eq!(handle_result_unwrapped.messages, vec![]);
+
         // When tokens are in the parameter
         let handle_msg = HandleMsg::RegisterTokens {
             tokens: vec![mock_buttcoin(), mock_token()],
@@ -1221,5 +1247,23 @@ mod tests {
                 .unwrap(),
             ]
         );
+
+        // * it records the registered tokens in the config
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        let registered_tokens = config.registered_tokens.unwrap();
+        assert_eq!(
+            registered_tokens.contains_key(&mock_buttcoin().address),
+            true
+        );
+        assert_eq!(registered_tokens.contains_key(&mock_token().address), true);
+
+        // = When tokens already exist
+        let handle_msg = HandleMsg::RegisterTokens {
+            tokens: vec![mock_buttcoin(), mock_token()],
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        let handle_result_unwrapped = handle_result.unwrap();
+        // = * it doesn't send any messages
+        assert_eq!(handle_result_unwrapped.messages, vec![]);
     }
 }
