@@ -1,5 +1,5 @@
 use crate::authorize::authorize;
-use crate::constants::{BLOCK_SIZE, CONFIG_KEY, VIEWING_KEY};
+use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
 use crate::{
     msg::{HandleMsg, InitMsg, QueryMsg, Snip20Swap},
     state::{
@@ -369,13 +369,6 @@ fn register_tokens(env: &Env, tokens: Vec<SecretContract>) -> StdResult<HandleRe
             BLOCK_SIZE,
             contract_hash.clone(),
             address.clone(),
-        )?);
-        messages.push(snip20::set_viewing_key_msg(
-            VIEWING_KEY.into(),
-            None,
-            BLOCK_SIZE,
-            contract_hash,
-            address,
         )?);
     }
 
@@ -1206,20 +1199,12 @@ mod tests {
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
         let handle_result_unwrapped = handle_result.unwrap();
-        // * it sends a message to register receive for the token and sets a viewing key
+        // * it sends a message to register receive for the token
         assert_eq!(
             handle_result_unwrapped.messages,
             vec![
                 snip20::register_receive_msg(
                     mock_contract().contract_hash.clone(),
-                    None,
-                    BLOCK_SIZE,
-                    mock_buttcoin().contract_hash,
-                    mock_buttcoin().address,
-                )
-                .unwrap(),
-                snip20::set_viewing_key_msg(
-                    VIEWING_KEY.into(),
                     None,
                     BLOCK_SIZE,
                     mock_buttcoin().contract_hash,
@@ -1234,14 +1219,6 @@ mod tests {
                     mock_token().address,
                 )
                 .unwrap(),
-                snip20::set_viewing_key_msg(
-                    VIEWING_KEY.into(),
-                    None,
-                    BLOCK_SIZE,
-                    mock_token().contract_hash,
-                    mock_token().address,
-                )
-                .unwrap()
             ]
         );
     }
