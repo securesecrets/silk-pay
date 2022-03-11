@@ -1,3 +1,4 @@
+use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
 use crate::{
     msg::{HandleMsg, InitMsg, QueryMsg},
@@ -5,7 +6,7 @@ use crate::{
 };
 use cosmwasm_std::{
     from_binary, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    Querier, StdResult, Storage,
+    Querier, StdError, StdResult, Storage, Uint128,
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
@@ -38,6 +39,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::RegisterTokens { tokens } => register_tokens(deps, &env, tokens),
+        HandleMsg::UpdateFee { fee } => update_fee(deps, &env, fee),
     }
 }
 
@@ -91,6 +93,26 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+fn update_fee<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    fee: Uint128,
+) -> StdResult<HandleResponse> {
+    let mut config: Config = TypedStoreMut::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    authorize(env.message.sender.clone(), config.admin.clone())?;
+
+    config.fee = fee;
+    TypedStoreMut::attach(&mut deps.storage).store(CONFIG_KEY, &config)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +126,7 @@ mod tests {
         let env = mock_env(mock_contract_initiator_address(), &[]);
         let mut deps = mock_dependencies(20, &[]);
         let msg = InitMsg {
+            fee: Uint128(1_000_000),
             treasury_address: mock_treasury_address(),
         };
         (init(&mut deps, env, msg), deps)
@@ -238,5 +261,28 @@ mod tests {
         let handle_result_unwrapped = handle_result.unwrap();
         // = * it doesn't send any messages
         assert_eq!(handle_result_unwrapped.messages, vec![]);
+    }
+
+    #[test]
+    fn test_update_fee() {
+        let (_init_result, mut deps) = init_helper();
+        let env = mock_env(mock_user_address(), &[]);
+        let new_fee = Uint128(555);
+
+        // when called by non-admin
+        // * it raises an unauthorized error
+        let handle_msg = HandleMsg::UpdateFee { fee: new_fee };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // when admin calls this
+        let env = mock_env(mock_contract_initiator_address(), &[]);
+        let handle_result = handle(&mut deps, env, handle_msg);
+        handle_result.unwrap();
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        assert_eq!(config.fee, new_fee)
     }
 }

@@ -13,6 +13,7 @@ pub struct InitMsg {
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
     RegisterTokens { tokens: Vec<SecretContract> },
+    UpdateFee { fee: Uint128 },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
