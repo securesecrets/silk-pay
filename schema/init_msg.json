@@ -3,35 +3,16 @@
   "title": "InitMsg",
   "type": "object",
   "required": [
-    "butt_lode",
-    "buttcoin"
+    "treasury_address"
   ],
   "properties": {
-    "butt_lode": {
-      "$ref": "#/definitions/SecretContract"
-    },
-    "buttcoin": {
-      "$ref": "#/definitions/SecretContract"
+    "treasury_address": {
+      "$ref": "#/definitions/HumanAddr"
     }
   },
   "definitions": {
     "HumanAddr": {
       "type": "string"
-    },
-    "SecretContract": {
-      "type": "object",
-      "required": [
-        "address",
-        "contract_hash"
-      ],
-      "properties": {
-        "address": {
-          "$ref": "#/definitions/HumanAddr"
-        },
-        "contract_hash": {
-          "type": "string"
-        }
-      }
     }
   }
 }
