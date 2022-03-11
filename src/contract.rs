@@ -18,6 +18,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<InitResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
     let config: Config = Config {
+        admin: env.message.sender,
         treasury_address: msg.treasury_address,
         registered_tokens: None,
     };
