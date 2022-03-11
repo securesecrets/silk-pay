@@ -21,6 +21,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let config: Config = Config {
         admin: env.message.sender,
         fee: msg.fee,
+        new_admin_nomination: None,
         registered_tokens: None,
         treasury_address: msg.treasury_address,
     };
@@ -38,6 +39,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
+        HandleMsg::NominateNewAdmin { address } => nominate_new_admin(deps, &env, address),
         HandleMsg::RegisterTokens { tokens } => register_tokens(deps, &env, tokens),
         HandleMsg::UpdateFee { fee } => update_fee(deps, &env, fee),
     }
@@ -53,6 +55,26 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             Ok(to_binary(&config)?)
         }
     }
+}
+
+fn nominate_new_admin<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    address: HumanAddr,
+) -> StdResult<HandleResponse> {
+    let mut config: Config = TypedStoreMut::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    authorize(env.message.sender.clone(), config.admin.clone())?;
+
+    config.new_admin_nomination = Some(address);
+    TypedStoreMut::attach(&mut deps.storage).store(CONFIG_KEY, &config)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
 }
 
 fn register_tokens<S: Storage, A: Api, Q: Querier>(
@@ -192,6 +214,30 @@ mod tests {
     }
 
     // === HANDLE TESTS ===
+    #[test]
+    fn test_nominate_new_admin() {
+        let (_init_result, mut deps) = init_helper();
+        let env = mock_env(mock_user_address(), &[]);
+
+        // when called by non-admin
+        // * it raises an unauthorized error
+        let handle_msg = HandleMsg::NominateNewAdmin {
+            address: mock_user_address(),
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // when admin calls this
+        let env = mock_env(mock_contract_initiator_address(), &[]);
+        let handle_result = handle(&mut deps, env, handle_msg);
+        handle_result.unwrap();
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        assert_eq!(config.new_admin_nomination, Some(mock_user_address()))
+    }
+
     #[test]
     fn test_register_tokens() {
         let (_init_result, mut deps) = init_helper();

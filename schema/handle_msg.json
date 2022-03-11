@@ -5,6 +5,25 @@
     {
       "type": "object",
       "required": [
+        "nominate_new_admin"
+      ],
+      "properties": {
+        "nominate_new_admin": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
         "register_tokens"
       ],
       "properties": {
