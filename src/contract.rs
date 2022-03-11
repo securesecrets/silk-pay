@@ -18,9 +18,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<InitResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
     let config: Config = Config {
-        buttcoin: msg.buttcoin,
-        butt_lode: msg.butt_lode,
-        initiator: env.message.sender,
+        treasury_address: msg.treasury_address,
         registered_tokens: None,
     };
     config_store.store(CONFIG_KEY, &config)?;
@@ -38,6 +36,18 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::RegisterTokens { tokens } => register_tokens(deps, &env, tokens),
+    }
+}
+
+pub fn query<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    msg: QueryMsg,
+) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::Config {} => {
+            let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
+            Ok(to_binary(&config)?)
+        }
     }
 }
 
@@ -79,23 +89,10 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-pub fn query<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    msg: QueryMsg,
-) -> StdResult<Binary> {
-    match msg {
-        QueryMsg::Config {} => {
-            let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
-            Ok(to_binary(&config)?)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
-    use std::collections::VecDeque;
 
     // === HELPERS ===
     fn init_helper() -> (
@@ -105,24 +102,20 @@ mod tests {
         let env = mock_env(mock_contract_initiator_address(), &[]);
         let mut deps = mock_dependencies(20, &[]);
         let msg = InitMsg {
-            buttcoin: mock_buttcoin(),
-            butt_lode: mock_butt_lode(),
+            treasury_address: mock_treasury_address(),
         };
         (init(&mut deps, env, msg), deps)
     }
 
-    fn mock_buttcoin() -> SecretContract {
+    fn mock_silk() -> SecretContract {
         SecretContract {
-            address: HumanAddr::from("mock-buttcoin-address"),
-            contract_hash: "mock-buttcoin-contract-hash".to_string(),
+            address: HumanAddr::from("mock-silk-address"),
+            contract_hash: "mock-silk-contract-hash".to_string(),
         }
     }
 
-    fn mock_butt_lode() -> SecretContract {
-        SecretContract {
-            address: HumanAddr::from("mock-buttlode-address"),
-            contract_hash: "mock-buttlode-contract-hash".to_string(),
-        }
+    fn mock_treasury_address() -> HumanAddr {
+        HumanAddr::from("mock-treasury-address")
     }
 
     fn mock_contract() -> SecretContract {
@@ -134,7 +127,7 @@ mod tests {
     }
 
     fn mock_contract_initiator_address() -> HumanAddr {
-        HumanAddr::from("btn.group")
+        HumanAddr::from("shade-protocol")
     }
 
     fn mock_pair_contract() -> SecretContract {
@@ -158,7 +151,7 @@ mod tests {
         }
     }
 
-    fn mock_token() -> SecretContract {
+    fn mock_shade() -> SecretContract {
         SecretContract {
             address: HumanAddr::from("mock-token-address"),
             contract_hash: "mock-token-contract-hash".to_string(),
@@ -202,7 +195,7 @@ mod tests {
 
         // When tokens are in the parameter
         let handle_msg = HandleMsg::RegisterTokens {
-            tokens: vec![mock_buttcoin(), mock_token()],
+            tokens: vec![mock_silk(), mock_shade()],
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
         let handle_result_unwrapped = handle_result.unwrap();
@@ -214,16 +207,16 @@ mod tests {
                     mock_contract().contract_hash.clone(),
                     None,
                     BLOCK_SIZE,
-                    mock_buttcoin().contract_hash,
-                    mock_buttcoin().address,
+                    mock_silk().contract_hash,
+                    mock_silk().address,
                 )
                 .unwrap(),
                 snip20::register_receive_msg(
                     mock_contract().contract_hash,
                     None,
                     BLOCK_SIZE,
-                    mock_token().contract_hash,
-                    mock_token().address,
+                    mock_shade().contract_hash,
+                    mock_shade().address,
                 )
                 .unwrap(),
             ]
@@ -232,15 +225,12 @@ mod tests {
         // * it records the registered tokens in the config
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
         let registered_tokens = config.registered_tokens.unwrap();
-        assert_eq!(
-            registered_tokens.contains_key(&mock_buttcoin().address),
-            true
-        );
-        assert_eq!(registered_tokens.contains_key(&mock_token().address), true);
+        assert_eq!(registered_tokens.contains_key(&mock_silk().address), true);
+        assert_eq!(registered_tokens.contains_key(&mock_shade().address), true);
 
         // = When tokens already exist
         let handle_msg = HandleMsg::RegisterTokens {
-            tokens: vec![mock_buttcoin(), mock_token()],
+            tokens: vec![mock_silk(), mock_shade()],
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
         let handle_result_unwrapped = handle_result.unwrap();
