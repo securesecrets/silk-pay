@@ -1,5 +1,5 @@
 use crate::state::SecretContract;
-use cosmwasm_std::{Binary, HumanAddr, Uint128};
+use cosmwasm_std::{HumanAddr, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -12,15 +12,7 @@ pub struct InitMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
-    Receive {
-        from: HumanAddr,
-        msg: Option<Binary>,
-        amount: Uint128,
-    },
-    FinalizeRoute {},
-    RegisterTokens {
-        tokens: Vec<SecretContract>,
-    },
+    RegisterTokens { tokens: Vec<SecretContract> },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
