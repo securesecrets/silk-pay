@@ -9,8 +9,9 @@ use std::collections::VecDeque;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Config {
     pub admin: HumanAddr,
-    pub treasury_address: HumanAddr,
+    pub fee: Uint128,
     pub registered_tokens: Option<HashMap<HumanAddr, String>>,
+    pub treasury_address: HumanAddr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

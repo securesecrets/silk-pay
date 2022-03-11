@@ -19,8 +19,9 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
     let config: Config = Config {
         admin: env.message.sender,
-        treasury_address: msg.treasury_address,
+        fee: msg.fee,
         registered_tokens: None,
+        treasury_address: msg.treasury_address,
     };
     config_store.store(CONFIG_KEY, &config)?;
 
