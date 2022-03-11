@@ -155,20 +155,6 @@ mod tests {
         HumanAddr::from("shade-protocol")
     }
 
-    fn mock_pair_contract() -> SecretContract {
-        SecretContract {
-            address: HumanAddr::from("pair-contract-address"),
-            contract_hash: "pair-contract-contract-hash".to_string(),
-        }
-    }
-
-    fn mock_pair_contract_two() -> SecretContract {
-        SecretContract {
-            address: HumanAddr::from("pair-contract-two-address"),
-            contract_hash: "pair-contract-two-hash".to_string(),
-        }
-    }
-
     fn mock_sscrt() -> SecretContract {
         SecretContract {
             address: HumanAddr::from("mock-sscrt-address"),

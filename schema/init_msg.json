@@ -3,15 +3,22 @@
   "title": "InitMsg",
   "type": "object",
   "required": [
+    "fee",
     "treasury_address"
   ],
   "properties": {
+    "fee": {
+      "$ref": "#/definitions/Uint128"
+    },
     "treasury_address": {
       "$ref": "#/definitions/HumanAddr"
     }
   },
   "definitions": {
     "HumanAddr": {
+      "type": "string"
+    },
+    "Uint128": {
       "type": "string"
     }
   }
