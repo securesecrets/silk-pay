@@ -5,6 +5,17 @@
     {
       "type": "object",
       "required": [
+        "accept_new_admin_nomination"
+      ],
+      "properties": {
+        "accept_new_admin_nomination": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
         "nominate_new_admin"
       ],
       "properties": {

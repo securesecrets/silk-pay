@@ -39,6 +39,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
+        HandleMsg::AcceptNewAdminNomination {} => accept_new_admin_nomination(deps, &env),
         HandleMsg::NominateNewAdmin { address } => nominate_new_admin(deps, &env, address),
         HandleMsg::RegisterTokens { tokens } => register_tokens(deps, &env, tokens),
         HandleMsg::UpdateFee { fee } => update_fee(deps, &env, fee),
@@ -55,6 +56,32 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             Ok(to_binary(&config)?)
         }
     }
+}
+
+fn accept_new_admin_nomination<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+) -> StdResult<HandleResponse> {
+    let mut config: Config = TypedStoreMut::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    if config.new_admin_nomination.is_none() {
+        return Err(StdError::Unauthorized { backtrace: None });
+    }
+    authorize(
+        env.message.sender.clone(),
+        config.new_admin_nomination.clone().unwrap(),
+    )?;
+
+    config.admin = config.new_admin_nomination.unwrap();
+    config.new_admin_nomination = None;
+    TypedStoreMut::attach(&mut deps.storage).store(CONFIG_KEY, &config)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
 }
 
 fn nominate_new_admin<S: Storage, A: Api, Q: Querier>(
@@ -214,6 +241,45 @@ mod tests {
     }
 
     // === HANDLE TESTS ===
+    #[test]
+    fn test_accept_new_admin_nomination() {
+        let (_init_result, mut deps) = init_helper();
+        let env = mock_env(mock_user_address(), &[]);
+
+        // when a new admin nomination does not exist
+        // * it raises an unauthorized error
+        let handle_msg = HandleMsg::AcceptNewAdminNomination {};
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // when a new admin nomination exists
+        let new_admin_nomination_msg = HandleMsg::NominateNewAdmin {
+            address: mock_user_address(),
+        };
+        let env = mock_env(mock_contract_initiator_address(), &[]);
+        handle(&mut deps, env.clone(), new_admin_nomination_msg).unwrap();
+
+        // = when accepting of new admin nomination is called by the wrong person
+        // = * it raises an error
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // = when accepting of new admin nomination is called by the nominated person
+        let env = mock_env(mock_user_address(), &[]);
+        handle(&mut deps, env, handle_msg).unwrap();
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        // = * it updates the admin
+        assert_eq!(config.admin, mock_user_address());
+        // = * it sets the new admin nomination to None
+        assert_eq!(config.new_admin_nomination, None);
+    }
+
     #[test]
     fn test_nominate_new_admin() {
         let (_init_result, mut deps) = init_helper();
