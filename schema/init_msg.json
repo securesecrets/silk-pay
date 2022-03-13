@@ -4,11 +4,15 @@
   "type": "object",
   "required": [
     "fee",
+    "shade_token",
     "treasury_address"
   ],
   "properties": {
     "fee": {
       "$ref": "#/definitions/Uint128"
+    },
+    "shade_token": {
+      "$ref": "#/definitions/SecretContract"
     },
     "treasury_address": {
       "$ref": "#/definitions/HumanAddr"
@@ -17,6 +21,21 @@
   "definitions": {
     "HumanAddr": {
       "type": "string"
+    },
+    "SecretContract": {
+      "type": "object",
+      "required": [
+        "address",
+        "contract_hash"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/definitions/HumanAddr"
+        },
+        "contract_hash": {
+          "type": "string"
+        }
+      }
     },
     "Uint128": {
       "type": "string"
