@@ -1,6 +1,6 @@
 use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
-use crate::transaction_history::get_txs;
+use crate::transaction_history::{get_txs, store_tx};
 use crate::{
     msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg},
     state::{Config, SecretContract, Token},
@@ -42,7 +42,16 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::AcceptNewAdminNomination {} => accept_new_admin_nomination(deps, &env),
+        HandleMsg::CreateReceiveRequest {
+            address,
+            amount,
+            description,
+            token_address,
+        } => create_receive_request(deps, &env, address, amount, description, token_address),
         HandleMsg::NominateNewAdmin { address } => nominate_new_admin(deps, &env, address),
+        // HandleMsg::Receive {
+        //     from, amount, msg, ..
+        // } => receive(deps, env, from, amount, msg),
         HandleMsg::RegisterTokens { tokens } => register_tokens(deps, &env, tokens),
         HandleMsg::UpdateFee { fee } => update_fee(deps, &env, fee),
     }
@@ -66,34 +75,30 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-fn txs<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    address: HumanAddr,
-    key: String,
-    page: u32,
-    page_size: u32,
-) -> StdResult<Binary> {
-    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-
-    // This is here so that the user can use their viewing key for shade for this
-    snip20::balance_query(
-        &deps.querier,
-        address.clone(),
-        key.to_string(),
-        BLOCK_SIZE,
-        config.shade_token.contract_hash,
-        config.shade_token.address,
-    )?;
-
-    let address = deps.api.canonical_address(&address)?;
-    let (txs, total) = get_txs(&deps.api, &deps.storage, &address, page, page_size)?;
-
-    let result = QueryAnswer::Txs {
-        txs,
-        total: Some(total),
-    };
-    to_binary(&result)
-}
+// fn receive<S: Storage, A: Api, Q: Querier>(
+//     deps: &mut Extern<S, A, Q>,
+//     env: Env,
+//     from: HumanAddr,
+//     amount: Uint128,
+//     msg: Binary,
+// ) -> StdResult<HandleResponse> {
+//     let msg: ReceiveMsg = from_binary(&msg)?;
+//     match msg {
+//         ReceiveMsg::CreateReceiveRequest {
+//             request_amount,
+//             request_to,
+//             description,
+//         } => create_receive_request(
+//             deps,
+//             &env,
+//             from,
+//             amount,
+//             request_amount,
+//             request_to,
+//             description,
+//         ),
+//     }
+// }
 
 fn accept_new_admin_nomination<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -113,6 +118,50 @@ fn accept_new_admin_nomination<S: Storage, A: Api, Q: Querier>(
     config.admin = config.new_admin_nomination.unwrap();
     config.new_admin_nomination = None;
     TypedStoreMut::attach(&mut deps.storage).store(CONFIG_KEY, &config)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
+}
+
+fn create_receive_request<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    address: HumanAddr,
+    amount: Uint128,
+    description: Option<String>,
+    token_address: HumanAddr,
+) -> StdResult<HandleResponse> {
+    if !amount.is_zero() {
+        return Err(StdError::generic_err("Amount sent in must be zero."));
+    }
+
+    let config: Config = TypedStore::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    let registered_tokens: HashMap<HumanAddr, String> = if config.registered_tokens.is_some() {
+        config.registered_tokens.unwrap()
+    } else {
+        HashMap::new()
+    };
+    if !registered_tokens.contains_key(&token_address) {
+        return Err(StdError::generic_err(
+            "Token is not registered with this contract",
+        ));
+    }
+
+    store_tx(
+        &mut deps.storage,
+        &deps.api.canonical_address(&address)?,
+        &deps.api.canonical_address(&env.message.sender)?,
+        amount,
+        token_address,
+        description,
+        1,
+        &env.block,
+    )?;
 
     Ok(HandleResponse {
         messages: vec![],
@@ -177,6 +226,35 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
         log: vec![],
         data: None,
     })
+}
+
+fn txs<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+    key: String,
+    page: u32,
+    page_size: u32,
+) -> StdResult<Binary> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+
+    // This is here so that the user can use their viewing key for shade for this
+    snip20::balance_query(
+        &deps.querier,
+        address.clone(),
+        key.to_string(),
+        BLOCK_SIZE,
+        config.shade_token.contract_hash,
+        config.shade_token.address,
+    )?;
+
+    let address = deps.api.canonical_address(&address)?;
+    let (txs, total) = get_txs(&deps.api, &deps.storage, &address, page, page_size)?;
+
+    let result = QueryAnswer::Txs {
+        txs,
+        total: Some(total),
+    };
+    to_binary(&result)
 }
 
 fn update_fee<S: Storage, A: Api, Q: Querier>(
