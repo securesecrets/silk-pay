@@ -1,5 +1,4 @@
 use crate::constants::PREFIX_TXS;
-use crate::state::SecretContract;
 use cosmwasm_std::{
     Api, CanonicalAddr, HumanAddr, ReadonlyStorage, StdError, StdResult, Storage, Uint128,
 };
@@ -14,7 +13,7 @@ pub struct HumanizedTx {
     pub from: HumanAddr,
     pub to: HumanAddr,
     pub amount: Uint128,
-    pub token: SecretContract,
+    pub token_address: HumanAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub status: u8,
@@ -29,7 +28,7 @@ pub struct Tx {
     pub from: CanonicalAddr,
     pub to: CanonicalAddr,
     pub amount: Uint128,
-    pub token: SecretContract,
+    pub token_address: HumanAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub status: u8,
@@ -43,7 +42,7 @@ impl Tx {
             from: api.human_address(&self.from)?,
             to: api.human_address(&self.to)?,
             amount: self.amount,
-            token: self.token,
+            token_address: self.token_address,
             description: self.description,
             status: self.status,
             block_time: self.block_time,
@@ -89,7 +88,7 @@ pub fn store_tx<S: Storage>(
     from: &CanonicalAddr,
     to: &CanonicalAddr,
     amount: Uint128,
-    token: SecretContract,
+    token_address: HumanAddr,
     description: Option<String>,
     status: u8,
     block: &cosmwasm_std::BlockInfo,
@@ -108,7 +107,7 @@ pub fn store_tx<S: Storage>(
         from: from.clone(),
         to: to.clone(),
         amount: amount,
-        token: token,
+        token_address: token_address,
         description: description,
         status: status,
         block_time: block.time,

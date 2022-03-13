@@ -15,10 +15,38 @@ pub struct InitMsg {
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
     AcceptNewAdminNomination {},
-    NominateNewAdmin { address: HumanAddr },
-    RegisterTokens { tokens: Vec<SecretContract> },
-    UpdateFee { fee: Uint128 },
+    CreateReceiveRequest {
+        address: HumanAddr,
+        amount: Uint128,
+        description: Option<String>,
+        token_address: HumanAddr,
+    },
+    NominateNewAdmin {
+        address: HumanAddr,
+    },
+    // Receive {
+    //     sender: HumanAddr,
+    //     from: HumanAddr,
+    //     amount: Uint128,
+    //     msg: Binary,
+    // },
+    RegisterTokens {
+        tokens: Vec<SecretContract>,
+    },
+    UpdateFee {
+        fee: Uint128,
+    },
 }
+
+// #[derive(Serialize, Deserialize, JsonSchema, Debug)]
+// #[serde(rename_all = "snake_case")]
+// pub enum ReceiveMsg {
+//     CreateReceiveRequest {
+//         description: String,
+//         request_amount: Uint128,
+//         request_to: HumanAddr,
+//     },
+// }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
