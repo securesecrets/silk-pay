@@ -1,7 +1,8 @@
 use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
+use crate::transaction_history::get_txs;
 use crate::{
-    msg::{HandleMsg, InitMsg, QueryMsg},
+    msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg},
     state::{Config, SecretContract, Token},
 };
 use cosmwasm_std::{
@@ -23,6 +24,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         fee: msg.fee,
         new_admin_nomination: None,
         registered_tokens: None,
+        shade_token: msg.shade_token,
         treasury_address: msg.treasury_address,
     };
     config_store.store(CONFIG_KEY, &config)?;
@@ -55,7 +57,42 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
             Ok(to_binary(&config)?)
         }
+        QueryMsg::Txs {
+            address,
+            key,
+            page,
+            page_size,
+        } => txs(deps, address, key, page, page_size),
     }
+}
+
+fn txs<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+    key: String,
+    page: u32,
+    page_size: u32,
+) -> StdResult<Binary> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+
+    // This is here so that the user can use their viewing key for shade for this
+    snip20::balance_query(
+        &deps.querier,
+        address.clone(),
+        key.to_string(),
+        BLOCK_SIZE,
+        config.shade_token.contract_hash,
+        config.shade_token.address,
+    )?;
+
+    let address = deps.api.canonical_address(&address)?;
+    let (txs, total) = get_txs(&deps.api, &deps.storage, &address, page, page_size)?;
+
+    let result = QueryAnswer::Txs {
+        txs,
+        total: Some(total),
+    };
+    to_binary(&result)
 }
 
 fn accept_new_admin_nomination<S: Storage, A: Api, Q: Querier>(
@@ -175,6 +212,7 @@ mod tests {
         let env = mock_env(mock_contract_initiator_address(), &[]);
         let mut deps = mock_dependencies(20, &[]);
         let msg = InitMsg {
+            shade_token: mock_shade(),
             fee: Uint128(1_000_000),
             treasury_address: mock_treasury_address(),
         };

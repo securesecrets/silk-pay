@@ -9,6 +9,7 @@ pub struct Config {
     pub fee: Uint128,
     pub new_admin_nomination: Option<HumanAddr>,
     pub registered_tokens: Option<HashMap<HumanAddr, String>>,
+    pub shade_token: SecretContract,
     pub treasury_address: HumanAddr,
 }
 
