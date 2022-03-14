@@ -13,7 +13,6 @@ use cosmwasm_std::{
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
-use std::collections::HashMap;
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -21,9 +20,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
-    let mut registered_tokens: HashMap<HumanAddr, String> = HashMap::new();
-    registered_tokens.insert(msg.shade.address.clone(), msg.shade.contract_hash.clone());
-    registered_tokens.insert(msg.sscrt.address.clone(), msg.sscrt.contract_hash.clone());
+    let registered_tokens: Vec<HumanAddr> =
+        vec![msg.shade.address.clone(), msg.sscrt.address.clone()];
     let config: Config = Config {
         admin: env.message.sender,
         fee: msg.fee,
@@ -115,7 +113,10 @@ fn receive<S: Storage, A: Api, Q: Querier>(
         ReceiveMsg::ConfirmAddress { position } => {
             confirm_address(deps, &env, from, amount, position)
         }
-        ReceiveMsg::SendPayment { position } => send_payment(deps, &env, from, amount, position),
+        ReceiveMsg::SendPayment {
+            position,
+            contract_hash,
+        } => send_payment(deps, &env, from, amount, position, contract_hash),
     }
 }
 
@@ -194,6 +195,7 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
     from: HumanAddr,
     amount: Uint128,
     position: u32,
+    contract_hash: String,
 ) -> StdResult<HandleResponse> {
     let (mut from_tx, mut to_tx) = verify_txs(
         &mut deps.storage,
@@ -210,11 +212,6 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
     let config: Config = TypedStore::attach(&mut deps.storage)
         .load(CONFIG_KEY)
         .unwrap();
-    let contract_hash: String = config
-        .registered_tokens
-        .get(&env.message.sender)
-        .unwrap()
-        .to_string();
     let mut messages: Vec<CosmosMsg> = vec![];
     let withdrawal_coins: Vec<Coin> = vec![Coin {
         denom: "uscrt".to_string(),
@@ -228,7 +225,6 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
     messages.push(snip20::transfer_msg(
         deps.api.human_address(&from_tx.to)?,
         from_tx.amount,
-        None,
         None,
         BLOCK_SIZE,
         contract_hash,
@@ -280,7 +276,7 @@ fn correct_fee_paid(env: &Env, config: Config) -> StdResult<()> {
 }
 
 fn token_registered(config: Config, token_address: HumanAddr) -> StdResult<()> {
-    if !config.registered_tokens.contains_key(&token_address) {
+    if !config.registered_tokens.contains(&token_address) {
         return Err(StdError::generic_err(
             "Token is not registered with this contract",
         ));
@@ -387,7 +383,7 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
         .unwrap();
     let mut messages = vec![];
     for token in tokens {
-        if !config.registered_tokens.contains_key(&token.address) {
+        if !config.registered_tokens.contains(&token.address) {
             let address = token.address;
             let contract_hash = token.contract_hash;
             messages.push(snip20::register_receive_msg(
@@ -397,7 +393,7 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
                 contract_hash.clone(),
                 address.clone(),
             )?);
-            config.registered_tokens.insert(address, contract_hash);
+            config.registered_tokens.push(address);
         }
     }
     TypedStoreMut::attach(&mut deps.storage).store(CONFIG_KEY, &config)?;
@@ -628,11 +624,11 @@ mod tests {
         // * it records the registered tokens in the config
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
         assert_eq!(
-            config.registered_tokens.contains_key(&mock_silk().address),
+            config.registered_tokens.contains(&mock_silk().address),
             true
         );
         assert_eq!(
-            config.registered_tokens.contains_key(&mock_shade().address),
+            config.registered_tokens.contains(&mock_shade().address),
             true
         );
 
