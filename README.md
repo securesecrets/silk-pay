@@ -19,6 +19,9 @@
 ### Cancelling
 * Either party can cancel the Tx and the fee is sent back to the creator. (Tx status = cancelled)
 
+### Shared Viewing Key
+Trialling access for the user via them using their SHADE viewing key. There's so many viewing keys these days so thought it could be a win-win for everyone (user doesn't have to create and store another viewing key, network doesn't have to request with viewing key everytime someone comes to the site or opens their wallet).
+
 ## References
 1. Silk Pay description: https://github.com/securesecrets/ShadeGrants/issues/1
 2. Secret contracts guide: https://github.com/enigmampc/secret-contracts-guide
