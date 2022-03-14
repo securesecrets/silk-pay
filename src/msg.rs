@@ -1,6 +1,6 @@
 use crate::state::SecretContract;
 use crate::transaction_history::HumanizedTx;
-use cosmwasm_std::{HumanAddr, Uint128};
+use cosmwasm_std::{Binary, HumanAddr, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -24,12 +24,12 @@ pub enum HandleMsg {
     NominateNewAdmin {
         address: HumanAddr,
     },
-    // Receive {
-    //     sender: HumanAddr,
-    //     from: HumanAddr,
-    //     amount: Uint128,
-    //     msg: Binary,
-    // },
+    Receive {
+        sender: HumanAddr,
+        from: HumanAddr,
+        amount: Uint128,
+        msg: Binary,
+    },
     RegisterTokens {
         tokens: Vec<SecretContract>,
     },
@@ -38,15 +38,11 @@ pub enum HandleMsg {
     },
 }
 
-// #[derive(Serialize, Deserialize, JsonSchema, Debug)]
-// #[serde(rename_all = "snake_case")]
-// pub enum ReceiveMsg {
-//     CreateReceiveRequest {
-//         description: String,
-//         request_amount: Uint128,
-//         request_to: HumanAddr,
-//     },
-// }
+#[derive(Serialize, Deserialize, JsonSchema, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiveMsg {
+    SendPayment { position: u32 },
+}
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]

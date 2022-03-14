@@ -1,15 +1,17 @@
 use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
-use crate::transaction_history::{get_txs, store_tx};
+use crate::transaction_history::{get_txs, store_tx, update_tx, verify_txs};
 use crate::{
-    msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg},
+    msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg},
     state::{Config, SecretContract, Token},
 };
 use cosmwasm_std::{
     from_binary, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
     Querier, StdError, StdResult, Storage, Uint128,
 };
+
 use secret_toolkit::snip20;
+
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
 use std::collections::HashMap;
 
@@ -49,9 +51,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             token_address,
         } => create_receive_request(deps, &env, address, amount, description, token_address),
         HandleMsg::NominateNewAdmin { address } => nominate_new_admin(deps, &env, address),
-        // HandleMsg::Receive {
-        //     from, amount, msg, ..
-        // } => receive(deps, env, from, amount, msg),
+        HandleMsg::Receive {
+            from, amount, msg, ..
+        } => receive(deps, env, from, amount, msg),
         HandleMsg::RegisterTokens { tokens } => register_tokens(deps, &env, tokens),
         HandleMsg::UpdateFee { fee } => update_fee(deps, &env, fee),
     }
@@ -75,30 +77,61 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-// fn receive<S: Storage, A: Api, Q: Querier>(
-//     deps: &mut Extern<S, A, Q>,
-//     env: Env,
-//     from: HumanAddr,
-//     amount: Uint128,
-//     msg: Binary,
-// ) -> StdResult<HandleResponse> {
-//     let msg: ReceiveMsg = from_binary(&msg)?;
-//     match msg {
-//         ReceiveMsg::CreateReceiveRequest {
-//             request_amount,
-//             request_to,
-//             description,
-//         } => create_receive_request(
-//             deps,
-//             &env,
-//             from,
-//             amount,
-//             request_amount,
-//             request_to,
-//             description,
-//         ),
-//     }
-// }
+fn receive<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    from: HumanAddr,
+    amount: Uint128,
+    msg: Binary,
+) -> StdResult<HandleResponse> {
+    let msg: ReceiveMsg = from_binary(&msg)?;
+    match msg {
+        ReceiveMsg::SendPayment { position } => send_payment(deps, &env, from, amount, position),
+    }
+}
+
+fn send_payment<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
+    position: u32,
+) -> StdResult<HandleResponse> {
+    let (mut from_tx, mut to_tx) = verify_txs(
+        &mut deps.storage,
+        &deps.api.canonical_address(&from)?,
+        amount,
+        position,
+        1,
+        env.message.sender.clone(),
+    )?;
+    from_tx.status = 3;
+    to_tx.status = 3;
+    update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx.clone())?;
+    update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx)?;
+    let config: Config = TypedStore::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    let contract_hash: String = config
+        .registered_tokens
+        .unwrap()
+        .get(&env.message.sender)
+        .unwrap()
+        .to_string();
+
+    Ok(HandleResponse {
+        messages: vec![snip20::transfer_msg(
+            deps.api.human_address(&from_tx.to)?,
+            from_tx.amount,
+            None,
+            BLOCK_SIZE,
+            contract_hash,
+            env.message.sender.clone(),
+        )?],
+        log: vec![],
+        data: None,
+    })
+}
 
 fn accept_new_admin_nomination<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
