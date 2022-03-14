@@ -21,18 +21,37 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
+    let mut registered_tokens: HashMap<HumanAddr, String> = HashMap::new();
+    registered_tokens.insert(msg.shade.address.clone(), msg.shade.contract_hash.clone());
+    registered_tokens.insert(msg.sscrt.address.clone(), msg.sscrt.contract_hash.clone());
     let config: Config = Config {
         admin: env.message.sender,
         fee: msg.fee,
         new_admin_nomination: None,
-        registered_tokens: None,
-        shade_token: msg.shade_token,
+        registered_tokens: registered_tokens,
+        shade: msg.shade.clone(),
+        sscrt: msg.sscrt.clone(),
         treasury_address: msg.treasury_address,
     };
     config_store.store(CONFIG_KEY, &config)?;
 
     Ok(InitResponse {
-        messages: vec![],
+        messages: vec![
+            snip20::register_receive_msg(
+                env.contract_code_hash.clone(),
+                None,
+                BLOCK_SIZE,
+                msg.shade.contract_hash,
+                msg.shade.address,
+            )?,
+            snip20::register_receive_msg(
+                env.contract_code_hash,
+                None,
+                BLOCK_SIZE,
+                msg.sscrt.contract_hash,
+                msg.sscrt.address,
+            )?,
+        ],
         log: vec![],
     })
 }
@@ -189,7 +208,6 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
         .unwrap();
     let contract_hash: String = config
         .registered_tokens
-        .unwrap()
         .get(&env.message.sender)
         .unwrap()
         .to_string();
@@ -257,12 +275,7 @@ fn correct_fee_paid(env: &Env, config: Config) -> StdResult<()> {
 }
 
 fn token_registered(config: Config, token_address: HumanAddr) -> StdResult<()> {
-    let registered_tokens: HashMap<HumanAddr, String> = if config.registered_tokens.is_some() {
-        config.registered_tokens.clone().unwrap()
-    } else {
-        HashMap::new()
-    };
-    if !registered_tokens.contains_key(&token_address) {
+    if !config.registered_tokens.contains_key(&token_address) {
         return Err(StdError::generic_err(
             "Token is not registered with this contract",
         ));
@@ -367,14 +380,9 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
     let mut config: Config = TypedStoreMut::attach(&mut deps.storage)
         .load(CONFIG_KEY)
         .unwrap();
-    let mut registered_tokens: HashMap<HumanAddr, String> = if config.registered_tokens.is_some() {
-        config.registered_tokens.unwrap()
-    } else {
-        HashMap::new()
-    };
     let mut messages = vec![];
     for token in tokens {
-        if !registered_tokens.contains_key(&token.address) {
+        if !config.registered_tokens.contains_key(&token.address) {
             let address = token.address;
             let contract_hash = token.contract_hash;
             messages.push(snip20::register_receive_msg(
@@ -384,10 +392,9 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
                 contract_hash.clone(),
                 address.clone(),
             )?);
-            registered_tokens.insert(address, contract_hash);
+            config.registered_tokens.insert(address, contract_hash);
         }
     }
-    config.registered_tokens = Some(registered_tokens);
     TypedStoreMut::attach(&mut deps.storage).store(CONFIG_KEY, &config)?;
 
     Ok(HandleResponse {
@@ -412,8 +419,8 @@ fn txs<S: Storage, A: Api, Q: Querier>(
         address.clone(),
         key.to_string(),
         BLOCK_SIZE,
-        config.shade_token.contract_hash,
-        config.shade_token.address,
+        config.shade.contract_hash,
+        config.shade.address,
     )?;
 
     let address = deps.api.canonical_address(&address)?;
@@ -459,8 +466,9 @@ mod tests {
         let env = mock_env(mock_contract_initiator_address(), &[]);
         let mut deps = mock_dependencies(20, &[]);
         let msg = InitMsg {
-            shade_token: mock_shade(),
             fee: Uint128(1_000_000),
+            shade: mock_shade(),
+            sscrt: mock_sscrt(),
             treasury_address: mock_treasury_address(),
         };
         (init(&mut deps, env, msg), deps)
@@ -498,8 +506,8 @@ mod tests {
 
     fn mock_shade() -> SecretContract {
         SecretContract {
-            address: HumanAddr::from("mock-token-address"),
-            contract_hash: "mock-token-contract-hash".to_string(),
+            address: HumanAddr::from("mock-shade-address"),
+            contract_hash: "mock-shade-contract-hash".to_string(),
         }
     }
 
@@ -624,9 +632,14 @@ mod tests {
 
         // * it records the registered tokens in the config
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-        let registered_tokens = config.registered_tokens.unwrap();
-        assert_eq!(registered_tokens.contains_key(&mock_silk().address), true);
-        assert_eq!(registered_tokens.contains_key(&mock_shade().address), true);
+        assert_eq!(
+            config.registered_tokens.contains_key(&mock_silk().address),
+            true
+        );
+        assert_eq!(
+            config.registered_tokens.contains_key(&mock_shade().address),
+            true
+        );
 
         // = When tokens already exist
         let handle_msg = HandleMsg::RegisterTokens {
