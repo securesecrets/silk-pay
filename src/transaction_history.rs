@@ -25,8 +25,10 @@ pub struct HumanizedTx {
 pub struct Tx {
     pub position: u32,
     pub other_storage_position: u32,
+    pub fee: Uint128,
     pub from: CanonicalAddr,
     pub to: CanonicalAddr,
+    pub creator: HumanAddr,
     pub amount: Uint128,
     pub token_address: HumanAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -118,8 +120,10 @@ pub fn get_txs<A: Api, S: ReadonlyStorage>(
 #[allow(clippy::too_many_arguments)] // We just need them
 pub fn store_tx<S: Storage>(
     store: &mut S,
+    fee: Uint128,
     from: &CanonicalAddr,
     to: &CanonicalAddr,
+    creator: HumanAddr,
     amount: Uint128,
     token_address: HumanAddr,
     description: Option<String>,
@@ -137,8 +141,10 @@ pub fn store_tx<S: Storage>(
     let from_tx = Tx {
         position: from_position,
         other_storage_position: to_position,
+        fee: fee,
         from: from.clone(),
         to: to.clone(),
+        creator: creator,
         amount: amount,
         token_address: token_address,
         description: description,
@@ -208,6 +214,23 @@ pub fn verify_txs<S: Storage>(
         return Err(StdError::generic_err(
             "Token address at that position is incorrect.",
         ));
+    }
+
+    Ok((from_tx, to_tx))
+}
+
+pub fn verify_txs_for_cancel<S: Storage>(
+    store: &mut S,
+    address: &CanonicalAddr,
+    position: u32,
+) -> StdResult<(Tx, Tx)> {
+    let from_tx = tx_at_position(store, address, position)?;
+    let to_tx = tx_at_position(store, &from_tx.to, from_tx.other_storage_position)?;
+    if to_tx.status == 2 {
+        return Err(StdError::generic_err("Tx already cancelled."));
+    }
+    if to_tx.status == 3 {
+        return Err(StdError::generic_err("Tx already finalized."));
     }
 
     Ok((from_tx, to_tx))

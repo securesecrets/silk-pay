@@ -15,6 +15,9 @@ pub struct InitMsg {
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
     AcceptNewAdminNomination {},
+    Cancel {
+        position: u32,
+    },
     CreateReceiveRequest {
         address: HumanAddr,
         amount: Uint128,

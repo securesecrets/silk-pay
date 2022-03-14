@@ -1,17 +1,15 @@
 use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
-use crate::transaction_history::{get_txs, store_tx, update_tx, verify_txs};
+use crate::transaction_history::{get_txs, store_tx, update_tx, verify_txs, verify_txs_for_cancel};
 use crate::{
     msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg},
     state::{Config, SecretContract, Token},
 };
 use cosmwasm_std::{
-    from_binary, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    Querier, StdError, StdResult, Storage, Uint128,
+    from_binary, to_binary, Api, BankMsg, Binary, Coin, CosmosMsg, Env, Extern, HandleResponse,
+    HumanAddr, InitResponse, Querier, StdError, StdResult, Storage, Uint128,
 };
-
 use secret_toolkit::snip20;
-
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
 use std::collections::HashMap;
 
@@ -56,6 +54,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         } => receive(deps, env, from, amount, msg),
         HandleMsg::RegisterTokens { tokens } => register_tokens(deps, &env, tokens),
         HandleMsg::UpdateFee { fee } => update_fee(deps, &env, fee),
+        HandleMsg::Cancel { position } => cancel(deps, &env, position),
     }
 }
 
@@ -90,6 +89,41 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     }
 }
 
+fn cancel<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    position: u32,
+) -> StdResult<HandleResponse> {
+    let (mut from_tx, mut to_tx) = verify_txs_for_cancel(
+        &mut deps.storage,
+        &deps.api.canonical_address(&env.message.sender)?,
+        position,
+    )?;
+    // Send refund to the creator
+    let mut messages: Vec<CosmosMsg> = vec![];
+    let withdrawal_coins: Vec<Coin> = vec![Coin {
+        denom: "uscrt".to_string(),
+        amount: from_tx.fee,
+    }];
+    messages.push(CosmosMsg::Bank(BankMsg::Send {
+        from_address: env.contract.address.clone(),
+        to_address: from_tx.creator.clone(),
+        amount: withdrawal_coins,
+    }));
+
+    // Update Txs
+    from_tx.status = 2;
+    to_tx.status = 2;
+    update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx)?;
+    update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx)?;
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![],
+        data: None,
+    })
+}
+
 fn send_payment<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
@@ -118,16 +152,27 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
         .get(&env.message.sender)
         .unwrap()
         .to_string();
+    let mut messages: Vec<CosmosMsg> = vec![];
+    let withdrawal_coins: Vec<Coin> = vec![Coin {
+        denom: "uscrt".to_string(),
+        amount: from_tx.fee,
+    }];
+    messages.push(CosmosMsg::Bank(BankMsg::Send {
+        from_address: env.contract.address.clone(),
+        to_address: config.treasury_address,
+        amount: withdrawal_coins,
+    }));
+    messages.push(snip20::transfer_msg(
+        deps.api.human_address(&from_tx.to)?,
+        from_tx.amount,
+        None,
+        BLOCK_SIZE,
+        contract_hash,
+        env.message.sender.clone(),
+    )?);
 
     Ok(HandleResponse {
-        messages: vec![snip20::transfer_msg(
-            deps.api.human_address(&from_tx.to)?,
-            from_tx.amount,
-            None,
-            BLOCK_SIZE,
-            contract_hash,
-            env.message.sender.clone(),
-        )?],
+        messages,
         log: vec![],
         data: None,
     })
@@ -187,8 +232,10 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
 
     store_tx(
         &mut deps.storage,
+        config.fee,
         &deps.api.canonical_address(&address)?,
         &deps.api.canonical_address(&env.message.sender)?,
+        env.message.sender.clone(),
         amount,
         token_address,
         description,
