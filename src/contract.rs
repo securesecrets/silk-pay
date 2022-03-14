@@ -48,6 +48,12 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             description,
             token_address,
         } => create_receive_request(deps, &env, address, amount, description, token_address),
+        HandleMsg::CreateSendRequest {
+            address,
+            amount,
+            description,
+            token_address,
+        } => create_send_request(deps, &env, address, amount, description, token_address),
         HandleMsg::NominateNewAdmin { address } => nominate_new_admin(deps, &env, address),
         HandleMsg::Receive {
             from, amount, msg, ..
@@ -215,21 +221,7 @@ fn correct_fee_paid(env: &Env, config: Config) -> StdResult<()> {
     Ok(())
 }
 
-fn create_receive_request<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: &Env,
-    address: HumanAddr,
-    amount: Uint128,
-    description: Option<String>,
-    token_address: HumanAddr,
-) -> StdResult<HandleResponse> {
-    if !amount.is_zero() {
-        return Err(StdError::generic_err("Amount sent in must be zero."));
-    }
-
-    let config: Config = TypedStore::attach(&mut deps.storage)
-        .load(CONFIG_KEY)
-        .unwrap();
+fn token_registered(config: Config, token_address: HumanAddr) -> StdResult<()> {
     let registered_tokens: HashMap<HumanAddr, String> = if config.registered_tokens.is_some() {
         config.registered_tokens.clone().unwrap()
     } else {
@@ -240,6 +232,22 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
             "Token is not registered with this contract",
         ));
     }
+
+    Ok(())
+}
+
+fn create_receive_request<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    address: HumanAddr,
+    amount: Uint128,
+    description: Option<String>,
+    token_address: HumanAddr,
+) -> StdResult<HandleResponse> {
+    let config: Config = TypedStore::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    token_registered(config.clone(), token_address.clone())?;
     correct_fee_paid(env, config.clone())?;
 
     store_tx(
@@ -252,6 +260,40 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
         token_address,
         description,
         1,
+        &env.block,
+    )?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
+}
+
+fn create_send_request<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    address: HumanAddr,
+    amount: Uint128,
+    description: Option<String>,
+    token_address: HumanAddr,
+) -> StdResult<HandleResponse> {
+    let config: Config = TypedStore::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    token_registered(config.clone(), token_address.clone())?;
+    correct_fee_paid(env, config.clone())?;
+
+    store_tx(
+        &mut deps.storage,
+        config.fee,
+        &deps.api.canonical_address(&env.message.sender)?,
+        &deps.api.canonical_address(&address)?,
+        env.message.sender.clone(),
+        amount,
+        token_address,
+        description,
+        0,
         &env.block,
     )?;
 

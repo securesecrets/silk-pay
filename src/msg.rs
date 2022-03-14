@@ -24,6 +24,12 @@ pub enum HandleMsg {
         description: Option<String>,
         token_address: HumanAddr,
     },
+    CreateSendRequest {
+        address: HumanAddr,
+        amount: Uint128,
+        description: Option<String>,
+        token_address: HumanAddr,
+    },
     NominateNewAdmin {
         address: HumanAddr,
     },
