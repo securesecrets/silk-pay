@@ -126,6 +126,10 @@ fn confirm_address<S: Storage, A: Api, Q: Querier>(
     amount: Uint128,
     position: u32,
 ) -> StdResult<HandleResponse> {
+    let config: Config = TypedStoreMut::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    authorize(env.message.sender.clone(), config.sscrt.address)?;
     if !amount.is_zero() {
         return Err(StdError::generic_err("Amount sent in should be zero."));
     }
@@ -224,6 +228,7 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
     messages.push(snip20::transfer_msg(
         deps.api.human_address(&from_tx.to)?,
         from_tx.amount,
+        None,
         None,
         BLOCK_SIZE,
         contract_hash,
@@ -610,24 +615,14 @@ mod tests {
         // * it sends a message to register receive for the token
         assert_eq!(
             handle_result_unwrapped.messages,
-            vec![
-                snip20::register_receive_msg(
-                    mock_contract().contract_hash.clone(),
-                    None,
-                    BLOCK_SIZE,
-                    mock_silk().contract_hash,
-                    mock_silk().address,
-                )
-                .unwrap(),
-                snip20::register_receive_msg(
-                    mock_contract().contract_hash,
-                    None,
-                    BLOCK_SIZE,
-                    mock_shade().contract_hash,
-                    mock_shade().address,
-                )
-                .unwrap(),
-            ]
+            vec![snip20::register_receive_msg(
+                mock_contract().contract_hash.clone(),
+                None,
+                BLOCK_SIZE,
+                mock_silk().contract_hash,
+                mock_silk().address,
+            )
+            .unwrap(),]
         );
 
         // * it records the registered tokens in the config
