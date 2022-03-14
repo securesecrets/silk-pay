@@ -19,18 +19,6 @@ pub enum HandleMsg {
     Cancel {
         position: u32,
     },
-    CreateReceiveRequest {
-        address: HumanAddr,
-        amount: Uint128,
-        description: Option<String>,
-        token_address: HumanAddr,
-    },
-    CreateSendRequest {
-        address: HumanAddr,
-        amount: Uint128,
-        description: Option<String>,
-        token_address: HumanAddr,
-    },
     NominateNewAdmin {
         address: HumanAddr,
     },
@@ -53,6 +41,18 @@ pub enum HandleMsg {
 pub enum ReceiveMsg {
     ConfirmAddress {
         position: u32,
+    },
+    CreateReceiveRequest {
+        address: HumanAddr,
+        send_amount: Uint128,
+        description: Option<String>,
+        token_address: HumanAddr,
+    },
+    CreateSendRequest {
+        address: HumanAddr,
+        send_amount: Uint128,
+        description: Option<String>,
+        token_address: HumanAddr,
     },
     SendPayment {
         position: u32,
