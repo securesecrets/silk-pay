@@ -20,40 +20,21 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
-    let registered_tokens: Vec<HumanAddr> =
-        vec![msg.shade.address.clone(), msg.sscrt.address.clone()];
     let config: Config = Config {
         admin: env.message.sender,
         fee: msg.fee,
         new_admin_nomination: None,
-        registered_tokens: registered_tokens,
+        registered_tokens: vec![],
         shade: msg.shade.clone(),
         sscrt: msg.sscrt.clone(),
         treasury_address: msg.treasury_address,
     };
     config_store.store(CONFIG_KEY, &config)?;
-    let mut registered_tokens_storage = RegisteredTokensStorage::from_storage(&mut deps.storage);
-    let shade_address_byte_slice: &[u8] = msg.shade.address.0.as_bytes();
-    registered_tokens_storage.set_contract_hash(shade_address_byte_slice, &msg.shade.contract_hash);
-    let sscrt_address_byte_slice: &[u8] = msg.sscrt.address.0.as_bytes();
-    registered_tokens_storage.set_contract_hash(sscrt_address_byte_slice, &msg.shade.contract_hash);
 
     Ok(InitResponse {
         messages: vec![
-            snip20::register_receive_msg(
-                env.contract_code_hash.clone(),
-                None,
-                BLOCK_SIZE,
-                msg.shade.contract_hash,
-                msg.shade.address,
-            )?,
-            snip20::register_receive_msg(
-                env.contract_code_hash,
-                None,
-                BLOCK_SIZE,
-                msg.sscrt.contract_hash,
-                msg.sscrt.address,
-            )?,
+            register_token(&mut deps.storage, env.contract_code_hash.clone(), msg.sscrt)?.unwrap(),
+            register_token(&mut deps.storage, env.contract_code_hash, msg.shade)?.unwrap(),
         ],
         log: vec![],
     })
@@ -70,7 +51,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
-        HandleMsg::RegisterTokens { tokens } => register_tokens(deps, &env, tokens),
         HandleMsg::UpdateFee { fee } => update_fee(deps, &env, fee),
     }
 }
@@ -110,7 +90,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             address,
             send_amount,
             description,
-            token_address,
+            token,
         } => create_send_request(
             deps,
             &env,
@@ -119,7 +99,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             address,
             send_amount,
             description,
-            token_address,
+            token,
         ),
         ReceiveMsg::SendPayment {
             position,
@@ -129,7 +109,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             address,
             send_amount,
             description,
-            token_address,
+            token,
         } => create_receive_request(
             deps,
             &env,
@@ -138,7 +118,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             address,
             send_amount,
             description,
-            token_address,
+            token,
         ),
     }
 }
@@ -306,14 +286,26 @@ fn correct_fee_paid(amount: Uint128, token_address: HumanAddr, config: Config) -
     Ok(())
 }
 
-fn token_registered(config: Config, token_address: HumanAddr) -> StdResult<()> {
-    if !config.registered_tokens.contains(&token_address) {
-        return Err(StdError::generic_err(
-            "Token is not registered with this contract",
-        ));
+fn register_token<S: Storage>(
+    storage: &mut S,
+    contract_code_hash: String,
+    token: SecretContract,
+) -> StdResult<Option<CosmosMsg>> {
+    let mut cosmos_msg: Option<CosmosMsg> = None;
+    let mut registered_tokens_storage = RegisteredTokensStorage::from_storage(storage);
+    let contract_hash = registered_tokens_storage.get_contract_hash(&token.address.to_string());
+    if contract_hash.is_none() {
+        registered_tokens_storage.set_contract_hash(token.address.clone(), &token.contract_hash);
+        cosmos_msg = Some(snip20::register_receive_msg(
+            contract_code_hash,
+            None,
+            BLOCK_SIZE,
+            token.contract_hash,
+            token.address,
+        )?);
     }
 
-    Ok(())
+    Ok(cosmos_msg)
 }
 
 fn create_receive_request<S: Storage, A: Api, Q: Querier>(
@@ -324,14 +316,22 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
     address: HumanAddr,
     send_amount: Uint128,
     description: Option<String>,
-    token_address: HumanAddr,
+    token: SecretContract,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&mut deps.storage)
         .load(CONFIG_KEY)
         .unwrap();
-    token_registered(config.clone(), token_address.clone())?;
     correct_fee_paid(amount, env.message.sender.clone(), config.clone())?;
 
+    let mut messages: Vec<CosmosMsg> = vec![];
+    let register_token_msg: Option<CosmosMsg> = register_token(
+        &mut deps.storage,
+        env.contract_code_hash.clone(),
+        token.clone(),
+    )?;
+    if register_token_msg.is_some() {
+        messages.push(register_token_msg.unwrap())
+    }
     store_tx(
         &mut deps.storage,
         config.fee,
@@ -339,7 +339,7 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&from)?,
         from,
         send_amount,
-        token_address,
+        token.address,
         description,
         1,
         &env.block,
@@ -360,14 +360,22 @@ fn create_send_request<S: Storage, A: Api, Q: Querier>(
     address: HumanAddr,
     send_amount: Uint128,
     description: Option<String>,
-    token_address: HumanAddr,
+    token: SecretContract,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&mut deps.storage)
         .load(CONFIG_KEY)
         .unwrap();
-    token_registered(config.clone(), token_address.clone())?;
     correct_fee_paid(amount, env.message.sender.clone(), config.clone())?;
 
+    let mut messages: Vec<CosmosMsg> = vec![];
+    let register_token_msg: Option<CosmosMsg> = register_token(
+        &mut deps.storage,
+        env.contract_code_hash.clone(),
+        token.clone(),
+    )?;
+    if register_token_msg.is_some() {
+        messages.push(register_token_msg.unwrap())
+    }
     store_tx(
         &mut deps.storage,
         config.fee,
@@ -375,7 +383,7 @@ fn create_send_request<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&address)?,
         from,
         send_amount,
-        token_address,
+        token.address,
         description,
         0,
         &env.block,
@@ -403,38 +411,6 @@ fn nominate_new_admin<S: Storage, A: Api, Q: Querier>(
 
     Ok(HandleResponse {
         messages: vec![],
-        log: vec![],
-        data: None,
-    })
-}
-
-fn register_tokens<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: &Env,
-    tokens: Vec<SecretContract>,
-) -> StdResult<HandleResponse> {
-    let mut config: Config = TypedStoreMut::attach(&mut deps.storage)
-        .load(CONFIG_KEY)
-        .unwrap();
-    let mut messages = vec![];
-    for token in tokens {
-        if !config.registered_tokens.contains(&token.address) {
-            let address = token.address;
-            let contract_hash = token.contract_hash;
-            messages.push(snip20::register_receive_msg(
-                env.contract_code_hash.clone(),
-                None,
-                BLOCK_SIZE,
-                contract_hash.clone(),
-                address.clone(),
-            )?);
-            config.registered_tokens.push(address);
-        }
-    }
-    TypedStoreMut::attach(&mut deps.storage).store(CONFIG_KEY, &config)?;
-
-    Ok(HandleResponse {
-        messages,
         log: vec![],
         data: None,
     })
@@ -623,58 +599,6 @@ mod tests {
         handle_result.unwrap();
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
         assert_eq!(config.new_admin_nomination, Some(mock_user_address()))
-    }
-
-    #[test]
-    fn test_register_tokens() {
-        let (_init_result, mut deps) = init_helper();
-        let env = mock_env(mock_user_address(), &[]);
-
-        // when no tokens are sent in
-        let handle_msg = HandleMsg::RegisterTokens { tokens: vec![] };
-        let handle_result = handle(&mut deps, env.clone(), handle_msg);
-        let handle_result_unwrapped = handle_result.unwrap();
-        // * no messages are sent
-        assert_eq!(handle_result_unwrapped.messages, vec![]);
-
-        // When tokens are in the parameter
-        let handle_msg = HandleMsg::RegisterTokens {
-            tokens: vec![mock_silk(), mock_shade()],
-        };
-        let handle_result = handle(&mut deps, env.clone(), handle_msg);
-        let handle_result_unwrapped = handle_result.unwrap();
-        // * it sends a message to register receive for the token
-        assert_eq!(
-            handle_result_unwrapped.messages,
-            vec![snip20::register_receive_msg(
-                mock_contract().contract_hash.clone(),
-                None,
-                BLOCK_SIZE,
-                mock_silk().contract_hash,
-                mock_silk().address,
-            )
-            .unwrap(),]
-        );
-
-        // * it records the registered tokens in the config
-        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-        assert_eq!(
-            config.registered_tokens.contains(&mock_silk().address),
-            true
-        );
-        assert_eq!(
-            config.registered_tokens.contains(&mock_shade().address),
-            true
-        );
-
-        // = When tokens already exist
-        let handle_msg = HandleMsg::RegisterTokens {
-            tokens: vec![mock_silk(), mock_shade()],
-        };
-        let handle_result = handle(&mut deps, env.clone(), handle_msg);
-        let handle_result_unwrapped = handle_result.unwrap();
-        // = * it doesn't send any messages
-        assert_eq!(handle_result_unwrapped.messages, vec![]);
     }
 
     #[test]

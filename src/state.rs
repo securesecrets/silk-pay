@@ -59,7 +59,8 @@ impl<'a, S: Storage> RegisteredTokensStorage<'a, S> {
         self.as_readonly().get(key)
     }
 
-    pub fn set_contract_hash(&mut self, key: &[u8], value: &String) {
+    pub fn set_contract_hash(&mut self, key: HumanAddr, value: &String) {
+        let key = key.0.as_bytes();
         save(&mut self.storage, key, value).ok();
     }
 
