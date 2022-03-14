@@ -236,6 +236,23 @@ pub fn verify_txs_for_cancel<S: Storage>(
     Ok((from_tx, to_tx))
 }
 
+pub fn verify_txs_for_confirm_address<S: Storage>(
+    store: &mut S,
+    address: &CanonicalAddr,
+    position: u32,
+) -> StdResult<(Tx, Tx)> {
+    let to_tx = tx_at_position(store, address, position)?;
+    let from_tx = tx_at_position(store, &to_tx.from, to_tx.other_storage_position)?;
+
+    if to_tx.status != 0 {
+        return Err(StdError::generic_err(
+            "Tx not waiting for address confirmation.",
+        ));
+    }
+
+    Ok((from_tx, to_tx))
+}
+
 fn append_tx<S: Storage>(store: &mut S, tx: &Tx, for_address: &CanonicalAddr) -> StdResult<()> {
     let mut store = PrefixedStorage::multilevel(&[PREFIX_TXS, for_address.as_slice()], store);
     let mut store = AppendStoreMut::attach_or_create(&mut store)?;

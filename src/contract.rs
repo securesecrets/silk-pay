@@ -1,9 +1,11 @@
 use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
-use crate::transaction_history::{get_txs, store_tx, update_tx, verify_txs, verify_txs_for_cancel};
+use crate::transaction_history::{
+    get_txs, store_tx, update_tx, verify_txs, verify_txs_for_cancel, verify_txs_for_confirm_address,
+};
 use crate::{
     msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg},
-    state::{Config, SecretContract, Token},
+    state::{Config, SecretContract},
 };
 use cosmwasm_std::{
     from_binary, to_binary, Api, BankMsg, Binary, Coin, CosmosMsg, Env, Extern, HandleResponse,
@@ -91,8 +93,41 @@ fn receive<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let msg: ReceiveMsg = from_binary(&msg)?;
     match msg {
+        ReceiveMsg::ConfirmAddress { position } => {
+            confirm_address(deps, &env, from, amount, position)
+        }
         ReceiveMsg::SendPayment { position } => send_payment(deps, &env, from, amount, position),
     }
+}
+
+fn confirm_address<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
+    position: u32,
+) -> StdResult<HandleResponse> {
+    if !amount.is_zero() {
+        return Err(StdError::generic_err("Amount sent in should be zero."));
+    }
+
+    let (mut from_tx, mut to_tx) = verify_txs_for_confirm_address(
+        &mut deps.storage,
+        &deps.api.canonical_address(&from)?,
+        position,
+    )?;
+
+    // Update Txs
+    from_tx.status = 1;
+    to_tx.status = 1;
+    update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx)?;
+    update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
 }
 
 fn cancel<S: Storage, A: Api, Q: Querier>(
@@ -466,14 +501,6 @@ mod tests {
             address: HumanAddr::from("mock-token-address"),
             contract_hash: "mock-token-contract-hash".to_string(),
         }
-    }
-
-    fn mock_token_native() -> Token {
-        Token::Native(mock_sscrt())
-    }
-
-    fn mock_token_snip20() -> Token {
-        Token::Snip20(mock_sscrt())
     }
 
     fn mock_user_address() -> HumanAddr {

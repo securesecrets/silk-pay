@@ -50,6 +50,7 @@ pub enum HandleMsg {
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
+    ConfirmAddress { position: u32 },
     SendPayment { position: u32 },
 }
 
