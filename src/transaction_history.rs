@@ -82,6 +82,39 @@ impl StatusCode {
 
 // Storage functions:
 
+pub fn get_txs<A: Api, S: ReadonlyStorage>(
+    api: &A,
+    storage: &S,
+    for_address: &CanonicalAddr,
+    page: u32,
+    page_size: u32,
+) -> StdResult<(Vec<HumanizedTx>, u64)> {
+    let store = ReadonlyPrefixedStorage::multilevel(&[PREFIX_TXS, for_address.as_slice()], storage);
+
+    // Try to access the storage of txs for the account.
+    // If it doesn't exist yet, return an empty list of transfers.
+    let store = AppendStore::<Tx, _, _>::attach(&store);
+    let store = if let Some(result) = store {
+        result?
+    } else {
+        return Ok((vec![], 0));
+    };
+
+    // Take `page_size` txs starting from the latest tx, potentially skipping `page * page_size`
+    // txs from the start.
+    let tx_iter = store
+        .iter()
+        .rev()
+        .skip((page * page_size) as _)
+        .take(page_size as _);
+
+    // The `and_then` here flattens the `StdResult<StdResult<RichTx>>` to an `StdResult<RichTx>`
+    let txs: StdResult<Vec<HumanizedTx>> = tx_iter
+        .map(|tx| tx.map(|tx| tx.into_humanized(api)).and_then(|x| x))
+        .collect();
+    txs.map(|txs| (txs, store.len() as u64))
+}
+
 #[allow(clippy::too_many_arguments)] // We just need them
 pub fn store_tx<S: Storage>(
     store: &mut S,
@@ -122,6 +155,64 @@ pub fn store_tx<S: Storage>(
     Ok(())
 }
 
+pub fn tx_at_position<S: Storage>(
+    store: &mut S,
+    address: &CanonicalAddr,
+    position: u32,
+) -> StdResult<Tx> {
+    let mut store = PrefixedStorage::multilevel(&[PREFIX_TXS, address.as_slice()], store);
+    // Try to access the storage of txs for the account.
+    // If it doesn't exist yet, return an empty list of transfers.
+    let store = AppendStoreMut::<Tx, _, _>::attach_or_create(&mut store)?;
+
+    Ok(store.get_at(position)?)
+}
+
+pub fn update_tx<S: Storage>(store: &mut S, address: &CanonicalAddr, tx: Tx) -> StdResult<()> {
+    let mut store = PrefixedStorage::multilevel(&[PREFIX_TXS, address.as_slice()], store);
+    // Try to access the storage of txs for the account.
+    // If it doesn't exist yet, return an empty list of transfers.
+    let mut store = AppendStoreMut::<Tx, _, _>::attach_or_create(&mut store)?;
+    store.set_at(tx.position, &tx)?;
+
+    Ok(())
+}
+
+// Verify the Tx and then verify it's counter Tx
+pub fn verify_txs<S: Storage>(
+    store: &mut S,
+    address: &CanonicalAddr,
+    amount: Uint128,
+    position: u32,
+    status: u8,
+    token_address: HumanAddr,
+) -> StdResult<(Tx, Tx)> {
+    let from_tx = tx_at_position(store, address, position)?;
+    let to_tx = tx_at_position(store, &from_tx.to, from_tx.other_storage_position)?;
+    if to_tx.from != address.clone() {
+        return Err(StdError::generic_err(
+            "From address at that position is incorrect.",
+        ));
+    }
+    if to_tx.amount != amount {
+        return Err(StdError::generic_err(
+            "Amount at that position is incorrect.",
+        ));
+    }
+    if to_tx.status != status {
+        return Err(StdError::generic_err(
+            "Tx status at that position is incorrect.",
+        ));
+    }
+    if to_tx.token_address != token_address {
+        return Err(StdError::generic_err(
+            "Token address at that position is incorrect.",
+        ));
+    }
+
+    Ok((from_tx, to_tx))
+}
+
 fn append_tx<S: Storage>(store: &mut S, tx: &Tx, for_address: &CanonicalAddr) -> StdResult<()> {
     let mut store = PrefixedStorage::multilevel(&[PREFIX_TXS, for_address.as_slice()], store);
     let mut store = AppendStoreMut::attach_or_create(&mut store)?;
@@ -132,37 +223,4 @@ fn get_next_position<S: Storage>(store: &mut S, for_address: &CanonicalAddr) -> 
     let mut store = PrefixedStorage::multilevel(&[PREFIX_TXS, for_address.as_slice()], store);
     let store = AppendStoreMut::<Tx, _>::attach_or_create(&mut store)?;
     Ok(store.len())
-}
-
-pub fn get_txs<A: Api, S: ReadonlyStorage>(
-    api: &A,
-    storage: &S,
-    for_address: &CanonicalAddr,
-    page: u32,
-    page_size: u32,
-) -> StdResult<(Vec<HumanizedTx>, u64)> {
-    let store = ReadonlyPrefixedStorage::multilevel(&[PREFIX_TXS, for_address.as_slice()], storage);
-
-    // Try to access the storage of txs for the account.
-    // If it doesn't exist yet, return an empty list of transfers.
-    let store = AppendStore::<Tx, _, _>::attach(&store);
-    let store = if let Some(result) = store {
-        result?
-    } else {
-        return Ok((vec![], 0));
-    };
-
-    // Take `page_size` txs starting from the latest tx, potentially skipping `page * page_size`
-    // txs from the start.
-    let tx_iter = store
-        .iter()
-        .rev()
-        .skip((page * page_size) as _)
-        .take(page_size as _);
-
-    // The `and_then` here flattens the `StdResult<StdResult<RichTx>>` to an `StdResult<RichTx>`
-    let txs: StdResult<Vec<HumanizedTx>> = tx_iter
-        .map(|tx| tx.map(|tx| tx.into_humanized(api)).and_then(|x| x))
-        .collect();
-    txs.map(|txs| (txs, store.len() as u64))
 }
