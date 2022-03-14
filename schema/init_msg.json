@@ -4,14 +4,18 @@
   "type": "object",
   "required": [
     "fee",
-    "shade_token",
+    "shade",
+    "sscrt",
     "treasury_address"
   ],
   "properties": {
     "fee": {
       "$ref": "#/definitions/Uint128"
     },
-    "shade_token": {
+    "shade": {
+      "$ref": "#/definitions/SecretContract"
+    },
+    "sscrt": {
       "$ref": "#/definitions/SecretContract"
     },
     "treasury_address": {
