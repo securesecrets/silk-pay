@@ -61,18 +61,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::AcceptNewAdminNomination {} => accept_new_admin_nomination(deps, &env),
-        HandleMsg::CreateReceiveRequest {
-            address,
-            amount,
-            description,
-            token_address,
-        } => create_receive_request(deps, &env, address, amount, description, token_address),
-        HandleMsg::CreateSendRequest {
-            address,
-            amount,
-            description,
-            token_address,
-        } => create_send_request(deps, &env, address, amount, description, token_address),
         HandleMsg::NominateNewAdmin { address } => nominate_new_admin(deps, &env, address),
         HandleMsg::Receive {
             from, amount, msg, ..
@@ -113,10 +101,40 @@ fn receive<S: Storage, A: Api, Q: Querier>(
         ReceiveMsg::ConfirmAddress { position } => {
             confirm_address(deps, &env, from, amount, position)
         }
+        ReceiveMsg::CreateSendRequest {
+            address,
+            send_amount,
+            description,
+            token_address,
+        } => create_send_request(
+            deps,
+            &env,
+            from,
+            amount,
+            address,
+            send_amount,
+            description,
+            token_address,
+        ),
         ReceiveMsg::SendPayment {
             position,
             contract_hash,
         } => send_payment(deps, &env, from, amount, position, contract_hash),
+        ReceiveMsg::CreateReceiveRequest {
+            address,
+            send_amount,
+            description,
+            token_address,
+        } => create_receive_request(
+            deps,
+            &env,
+            from,
+            amount,
+            address,
+            send_amount,
+            description,
+            token_address,
+        ),
     }
 }
 
@@ -264,12 +282,12 @@ fn accept_new_admin_nomination<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn correct_fee_paid(env: &Env, config: Config) -> StdResult<()> {
-    if env.message.sent_funds.len() != 1
-        && env.message.sent_funds[0].amount != config.fee
-        && env.message.sent_funds[0].denom != "uscrt"
-    {
+fn correct_fee_paid(amount: Uint128, token_address: HumanAddr, config: Config) -> StdResult<()> {
+    if amount != config.fee {
         return Err(StdError::generic_err("Incorrect fee paid."));
+    }
+    if token_address != config.sscrt.address {
+        return Err(StdError::generic_err("Fee must be paid in sscrt."));
     }
 
     Ok(())
@@ -288,8 +306,10 @@ fn token_registered(config: Config, token_address: HumanAddr) -> StdResult<()> {
 fn create_receive_request<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
-    address: HumanAddr,
+    from: HumanAddr,
     amount: Uint128,
+    address: HumanAddr,
+    send_amount: Uint128,
     description: Option<String>,
     token_address: HumanAddr,
 ) -> StdResult<HandleResponse> {
@@ -297,15 +317,15 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
         .load(CONFIG_KEY)
         .unwrap();
     token_registered(config.clone(), token_address.clone())?;
-    correct_fee_paid(env, config.clone())?;
+    correct_fee_paid(amount, env.message.sender.clone(), config.clone())?;
 
     store_tx(
         &mut deps.storage,
         config.fee,
         &deps.api.canonical_address(&address)?,
-        &deps.api.canonical_address(&env.message.sender)?,
-        env.message.sender.clone(),
-        amount,
+        &deps.api.canonical_address(&from)?,
+        from,
+        send_amount,
         token_address,
         description,
         1,
@@ -322,8 +342,10 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
 fn create_send_request<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
-    address: HumanAddr,
+    from: HumanAddr,
     amount: Uint128,
+    address: HumanAddr,
+    send_amount: Uint128,
     description: Option<String>,
     token_address: HumanAddr,
 ) -> StdResult<HandleResponse> {
@@ -331,15 +353,15 @@ fn create_send_request<S: Storage, A: Api, Q: Querier>(
         .load(CONFIG_KEY)
         .unwrap();
     token_registered(config.clone(), token_address.clone())?;
-    correct_fee_paid(env, config.clone())?;
+    correct_fee_paid(amount, env.message.sender.clone(), config.clone())?;
 
     store_tx(
         &mut deps.storage,
         config.fee,
-        &deps.api.canonical_address(&env.message.sender)?,
+        &deps.api.canonical_address(&from)?,
         &deps.api.canonical_address(&address)?,
-        env.message.sender.clone(),
-        amount,
+        from,
+        send_amount,
         token_address,
         description,
         0,
