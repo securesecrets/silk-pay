@@ -25,9 +25,6 @@ pub enum HandleMsg {
         amount: Uint128,
         msg: Binary,
     },
-    RegisterTokens {
-        tokens: Vec<SecretContract>,
-    },
     UpdateFee {
         fee: Uint128,
     },
@@ -46,13 +43,13 @@ pub enum ReceiveMsg {
         address: HumanAddr,
         send_amount: Uint128,
         description: Option<String>,
-        token_address: HumanAddr,
+        token: SecretContract,
     },
     CreateSendRequest {
         address: HumanAddr,
         send_amount: Uint128,
         description: Option<String>,
-        token_address: HumanAddr,
+        token: SecretContract,
     },
     SendPayment {
         position: u32,
