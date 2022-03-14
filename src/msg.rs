@@ -16,9 +16,6 @@ pub struct InitMsg {
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
     AcceptNewAdminNomination {},
-    Cancel {
-        position: u32,
-    },
     NominateNewAdmin {
         address: HumanAddr,
     },
@@ -39,6 +36,9 @@ pub enum HandleMsg {
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
+    Cancel {
+        position: u32,
+    },
     ConfirmAddress {
         position: u32,
     },
