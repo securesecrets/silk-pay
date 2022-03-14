@@ -5,7 +5,7 @@ use crate::transaction_history::{
 };
 use crate::{
     msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg},
-    state::{Config, SecretContract},
+    state::{Config, RegisteredTokensStorage, SecretContract},
 };
 use cosmwasm_std::{
     from_binary, to_binary, Api, BankMsg, Binary, Coin, CosmosMsg, Env, Extern, HandleResponse,
@@ -32,6 +32,11 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         treasury_address: msg.treasury_address,
     };
     config_store.store(CONFIG_KEY, &config)?;
+    let mut registered_tokens_storage = RegisteredTokensStorage::from_storage(&mut deps.storage);
+    let shade_address_byte_slice: &[u8] = msg.shade.address.0.as_bytes();
+    registered_tokens_storage.set_contract_hash(shade_address_byte_slice, &msg.shade.contract_hash);
+    let sscrt_address_byte_slice: &[u8] = msg.sscrt.address.0.as_bytes();
+    registered_tokens_storage.set_contract_hash(sscrt_address_byte_slice, &msg.shade.contract_hash);
 
     Ok(InitResponse {
         messages: vec![
