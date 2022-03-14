@@ -11,7 +11,6 @@ pub struct Config {
     pub admin: HumanAddr,
     pub fee: Uint128,
     pub new_admin_nomination: Option<HumanAddr>,
-    pub registered_tokens: Vec<HumanAddr>,
     pub shade: SecretContract,
     pub sscrt: SecretContract,
     pub treasury_address: HumanAddr,

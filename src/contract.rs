@@ -24,7 +24,6 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         admin: env.message.sender,
         fee: msg.fee,
         new_admin_nomination: None,
-        registered_tokens: vec![],
         shade: msg.shade.clone(),
         sscrt: msg.sscrt.clone(),
         treasury_address: msg.treasury_address,
