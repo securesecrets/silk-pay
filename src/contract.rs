@@ -67,7 +67,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         } => receive(deps, env, from, amount, msg),
         HandleMsg::RegisterTokens { tokens } => register_tokens(deps, &env, tokens),
         HandleMsg::UpdateFee { fee } => update_fee(deps, &env, fee),
-        HandleMsg::Cancel { position } => cancel(deps, &env, position),
     }
 }
 
@@ -98,6 +97,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let msg: ReceiveMsg = from_binary(&msg)?;
     match msg {
+        ReceiveMsg::Cancel { position } => cancel(deps, &env, from, amount, position),
         ReceiveMsg::ConfirmAddress { position } => {
             confirm_address(deps, &env, from, amount, position)
         }
@@ -175,24 +175,32 @@ fn confirm_address<S: Storage, A: Api, Q: Querier>(
 fn cancel<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
     position: u32,
 ) -> StdResult<HandleResponse> {
     let (mut from_tx, mut to_tx) = verify_txs_for_cancel(
         &mut deps.storage,
-        &deps.api.canonical_address(&env.message.sender)?,
+        &deps.api.canonical_address(&from)?,
         position,
     )?;
     // Send refund to the creator
+    let config: Config = TypedStore::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    authorize(env.message.sender.clone(), config.sscrt.address.clone())?;
+    if !amount.is_zero() {
+        return Err(StdError::generic_err("Amount sent in should be zero."));
+    }
     let mut messages: Vec<CosmosMsg> = vec![];
-    let withdrawal_coins: Vec<Coin> = vec![Coin {
-        denom: "uscrt".to_string(),
-        amount: from_tx.fee,
-    }];
-    messages.push(CosmosMsg::Bank(BankMsg::Send {
-        from_address: env.contract.address.clone(),
-        to_address: from_tx.creator.clone(),
-        amount: withdrawal_coins,
-    }));
+    messages.push(snip20::transfer_msg(
+        from_tx.creator.clone(),
+        from_tx.fee,
+        None,
+        BLOCK_SIZE,
+        config.sscrt.contract_hash,
+        config.sscrt.address,
+    )?);
 
     // Update Txs
     from_tx.status = 2;
