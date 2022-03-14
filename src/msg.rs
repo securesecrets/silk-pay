@@ -53,7 +53,6 @@ pub enum ReceiveMsg {
     },
     SendPayment {
         position: u32,
-        contract_hash: String,
     },
 }
 

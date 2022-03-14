@@ -1,4 +1,5 @@
 use crate::constants::PREFIX_TXS;
+use crate::state::SecretContract;
 use cosmwasm_std::{
     Api, CanonicalAddr, HumanAddr, ReadonlyStorage, StdError, StdResult, Storage, Uint128,
 };
@@ -13,7 +14,7 @@ pub struct HumanizedTx {
     pub from: HumanAddr,
     pub to: HumanAddr,
     pub amount: Uint128,
-    pub token_address: HumanAddr,
+    pub token: SecretContract,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub status: u8,
@@ -30,7 +31,7 @@ pub struct Tx {
     pub to: CanonicalAddr,
     pub creator: HumanAddr,
     pub amount: Uint128,
-    pub token_address: HumanAddr,
+    pub token: SecretContract,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub status: u8,
@@ -44,7 +45,7 @@ impl Tx {
             from: api.human_address(&self.from)?,
             to: api.human_address(&self.to)?,
             amount: self.amount,
-            token_address: self.token_address,
+            token: self.token,
             description: self.description,
             status: self.status,
             block_time: self.block_time,
@@ -125,7 +126,7 @@ pub fn store_tx<S: Storage>(
     to: &CanonicalAddr,
     creator: HumanAddr,
     amount: Uint128,
-    token_address: HumanAddr,
+    token: SecretContract,
     description: Option<String>,
     status: u8,
     block: &cosmwasm_std::BlockInfo,
@@ -146,7 +147,7 @@ pub fn store_tx<S: Storage>(
         to: to.clone(),
         creator: creator,
         amount: amount,
-        token_address: token_address,
+        token: token,
         description: description,
         status: status,
         block_time: block.time,
@@ -210,7 +211,7 @@ pub fn verify_txs<S: Storage>(
             "Tx status at that position is incorrect.",
         ));
     }
-    if to_tx.token_address != token_address {
+    if to_tx.token.address != token_address {
         return Err(StdError::generic_err(
             "Token address at that position is incorrect.",
         ));

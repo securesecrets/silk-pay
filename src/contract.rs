@@ -8,8 +8,8 @@ use crate::{
     state::{Config, RegisteredTokensStorage, SecretContract},
 };
 use cosmwasm_std::{
-    from_binary, to_binary, Api, BankMsg, Binary, Coin, CosmosMsg, Env, Extern, HandleResponse,
-    HumanAddr, InitResponse, Querier, StdError, StdResult, Storage, Uint128,
+    from_binary, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
+    InitResponse, Querier, StdError, StdResult, Storage, Uint128,
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
@@ -100,10 +100,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             description,
             token,
         ),
-        ReceiveMsg::SendPayment {
-            position,
-            contract_hash,
-        } => send_payment(deps, &env, from, amount, position, contract_hash),
+        ReceiveMsg::SendPayment { position } => send_payment(deps, &env, from, amount, position),
         ReceiveMsg::CreateReceiveRequest {
             address,
             send_amount,
@@ -205,7 +202,6 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
     from: HumanAddr,
     amount: Uint128,
     position: u32,
-    contract_hash: String,
 ) -> StdResult<HandleResponse> {
     let (mut from_tx, mut to_tx) = verify_txs(
         &mut deps.storage,
@@ -223,21 +219,20 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
         .load(CONFIG_KEY)
         .unwrap();
     let mut messages: Vec<CosmosMsg> = vec![];
-    let withdrawal_coins: Vec<Coin> = vec![Coin {
-        denom: "uscrt".to_string(),
-        amount: from_tx.fee,
-    }];
-    messages.push(CosmosMsg::Bank(BankMsg::Send {
-        from_address: env.contract.address.clone(),
-        to_address: config.treasury_address,
-        amount: withdrawal_coins,
-    }));
+    messages.push(snip20::transfer_msg(
+        config.treasury_address,
+        from_tx.fee,
+        None,
+        BLOCK_SIZE,
+        config.sscrt.contract_hash,
+        config.sscrt.address,
+    )?);
     messages.push(snip20::transfer_msg(
         deps.api.human_address(&from_tx.to)?,
         from_tx.amount,
         None,
         BLOCK_SIZE,
-        contract_hash,
+        from_tx.token.contract_hash,
         env.message.sender.clone(),
     )?);
 
@@ -338,7 +333,7 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&from)?,
         from,
         send_amount,
-        token.address,
+        token,
         description,
         1,
         &env.block,
@@ -382,7 +377,7 @@ fn create_send_request<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&address)?,
         from,
         send_amount,
-        token.address,
+        token,
         description,
         0,
         &env.block,
