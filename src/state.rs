@@ -18,10 +18,3 @@ pub struct SecretContract {
     pub address: HumanAddr,
     pub contract_hash: String,
 }
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Token {
-    Snip20(SecretContract),
-    Native(SecretContract),
-}
