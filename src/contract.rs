@@ -204,6 +204,17 @@ fn accept_new_admin_nomination<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+fn correct_fee_paid(env: &Env, config: Config) -> StdResult<()> {
+    if env.message.sent_funds.len() != 1
+        && env.message.sent_funds[0].amount != config.fee
+        && env.message.sent_funds[0].denom != "uscrt"
+    {
+        return Err(StdError::generic_err("Incorrect fee paid."));
+    }
+
+    Ok(())
+}
+
 fn create_receive_request<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
@@ -220,7 +231,7 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
         .load(CONFIG_KEY)
         .unwrap();
     let registered_tokens: HashMap<HumanAddr, String> = if config.registered_tokens.is_some() {
-        config.registered_tokens.unwrap()
+        config.registered_tokens.clone().unwrap()
     } else {
         HashMap::new()
     };
@@ -229,6 +240,7 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
             "Token is not registered with this contract",
         ));
     }
+    correct_fee_paid(env, config.clone())?;
 
     store_tx(
         &mut deps.storage,
