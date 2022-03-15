@@ -287,7 +287,7 @@ fn register_token<S: Storage>(
 ) -> StdResult<Option<CosmosMsg>> {
     let mut cosmos_msg: Option<CosmosMsg> = None;
     let mut registered_tokens_storage = RegisteredTokensStorage::from_storage(storage);
-    let contract_hash = registered_tokens_storage.get_contract_hash(&token.address.to_string());
+    let contract_hash = registered_tokens_storage.get_contract_hash(token.address.clone());
     if contract_hash.is_none() {
         registered_tokens_storage.set_contract_hash(token.address.clone(), &token.contract_hash);
         cosmos_msg = Some(snip20::register_receive_msg(
@@ -462,6 +462,7 @@ fn update_fee<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::RegisteredTokensReadonlyStorage;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
 
     // === HELPERS ===
@@ -472,12 +473,16 @@ mod tests {
         let env = mock_env(mock_contract_initiator_address(), &[]);
         let mut deps = mock_dependencies(20, &[]);
         let msg = InitMsg {
-            fee: Uint128(1_000_000),
+            fee: mock_fee(),
             shade: mock_shade(),
             sscrt: mock_sscrt(),
             treasury_address: mock_treasury_address(),
         };
         (init(&mut deps, env, msg), deps)
+    }
+
+    fn mock_fee() -> Uint128 {
+        Uint128(1_000_000)
     }
 
     fn mock_silk() -> SecretContract {
@@ -519,6 +524,64 @@ mod tests {
 
     fn mock_user_address() -> HumanAddr {
         HumanAddr::from("gary")
+    }
+
+    // === INIT TEST ===
+    #[test]
+    fn test_init() {
+        // * it registers receive for sscrt and shade
+        let (init_result, deps) = init_helper();
+        assert_eq!(
+            init_result.unwrap().messages,
+            vec![
+                snip20::register_receive_msg(
+                    mock_env(mock_contract_initiator_address(), &[]).contract_code_hash,
+                    None,
+                    BLOCK_SIZE,
+                    mock_sscrt().contract_hash,
+                    mock_sscrt().address,
+                )
+                .unwrap(),
+                snip20::register_receive_msg(
+                    mock_env(mock_contract_initiator_address(), &[]).contract_code_hash,
+                    None,
+                    BLOCK_SIZE,
+                    mock_shade().contract_hash,
+                    mock_shade().address,
+                )
+                .unwrap(),
+            ],
+        );
+
+        // * it sets the correct Config
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        assert_eq!(
+            config,
+            Config {
+                admin: mock_contract_initiator_address(),
+                fee: mock_fee(),
+                new_admin_nomination: None,
+                shade: mock_shade(),
+                sscrt: mock_sscrt(),
+                treasury_address: mock_treasury_address(),
+            }
+        );
+
+        // * it stores the token => contract_hash in storage
+        let mut registered_tokens_storage =
+            RegisteredTokensReadonlyStorage::from_storage(&deps.storage);
+        assert_eq!(
+            registered_tokens_storage
+                .get_contract_hash(mock_sscrt().address)
+                .unwrap(),
+            mock_sscrt().contract_hash,
+        );
+        assert_eq!(
+            registered_tokens_storage
+                .get_contract_hash(mock_shade().address)
+                .unwrap(),
+            mock_shade().contract_hash,
+        )
     }
 
     // === QUERY TESTS ===

@@ -33,8 +33,9 @@ impl<'a, S: Storage> RegisteredTokensReadonlyStorage<'a, S> {
         }
     }
 
-    pub fn get_contract_hash(&self, key: &String) -> Option<Vec<u8>> {
-        self.as_readonly().get(key)
+    pub fn get_contract_hash(&mut self, key: HumanAddr) -> Option<String> {
+        let key = key.to_string();
+        self.as_readonly().get(&key)
     }
 
     // private
@@ -54,8 +55,9 @@ impl<'a, S: Storage> RegisteredTokensStorage<'a, S> {
         }
     }
 
-    pub fn get_contract_hash(&mut self, key: &String) -> Option<Vec<u8>> {
-        self.as_readonly().get(key)
+    pub fn get_contract_hash(&mut self, key: HumanAddr) -> Option<String> {
+        let key = key.to_string();
+        self.as_readonly().get(&key)
     }
 
     pub fn set_contract_hash(&mut self, key: HumanAddr, value: &String) {
@@ -72,9 +74,9 @@ impl<'a, S: Storage> RegisteredTokensStorage<'a, S> {
 
 struct ReadonlyRegisteredTokensStorageImpl<'a, S: ReadonlyStorage>(&'a S);
 impl<'a, S: ReadonlyStorage> ReadonlyRegisteredTokensStorageImpl<'a, S> {
-    pub fn get(&self, key: &String) -> Option<Vec<u8>> {
-        let contrat_hash: Option<Vec<u8>> = may_load(self.0, &key.as_bytes()).ok().unwrap();
-        contrat_hash
+    pub fn get(&self, key: &String) -> Option<String> {
+        let contract_hash: Option<String> = may_load(self.0, &key.as_bytes()).ok().unwrap();
+        contract_hash
     }
 }
 
