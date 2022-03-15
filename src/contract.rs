@@ -51,6 +51,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
         HandleMsg::UpdateFee { fee } => update_fee(deps, &env, fee),
+        HandleMsg::UpdateTreasuryAddress { address } => {
+            update_treasury_address(deps, &env, address)
+        }
     }
 }
 
@@ -459,6 +462,26 @@ fn update_fee<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+fn update_treasury_address<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    address: HumanAddr,
+) -> StdResult<HandleResponse> {
+    let mut config: Config = TypedStoreMut::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    authorize(env.message.sender.clone(), config.admin.clone())?;
+
+    config.treasury_address = address;
+    TypedStoreMut::attach(&mut deps.storage).store(CONFIG_KEY, &config)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -679,5 +702,30 @@ mod tests {
         handle_result.unwrap();
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
         assert_eq!(config.fee, new_fee)
+    }
+
+    #[test]
+    fn test_update_treasury_fee() {
+        let (_init_result, mut deps) = init_helper();
+        let env = mock_env(mock_user_address(), &[]);
+        let new_treasury_address = mock_contract().address;
+
+        // when called by non-admin
+        // * it raises an unauthorized error
+        let handle_msg = HandleMsg::UpdateTreasuryAddress {
+            address: new_treasury_address.clone(),
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // when admin calls this
+        let env = mock_env(mock_contract_initiator_address(), &[]);
+        let handle_result = handle(&mut deps, env, handle_msg);
+        handle_result.unwrap();
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        assert_eq!(config.treasury_address, new_treasury_address)
     }
 }

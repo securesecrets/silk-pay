@@ -28,6 +28,9 @@ pub enum HandleMsg {
     UpdateFee {
         fee: Uint128,
     },
+    UpdateTreasuryAddress {
+        address: HumanAddr,
+    },
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
