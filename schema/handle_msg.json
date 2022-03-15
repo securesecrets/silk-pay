@@ -81,6 +81,25 @@
           }
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "update_treasury_address"
+      ],
+      "properties": {
+        "update_treasury_address": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {

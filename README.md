@@ -2,6 +2,7 @@
 ## Design choices
 ### Admin 
 * Admin can change the fee.
+* Admin can change the treasury_address.
 * Admin can nominate a new admin.
 * Nominated new admin can accept the nomination and replace the current admin.
 
