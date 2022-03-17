@@ -22,7 +22,7 @@ pub struct HumanizedTx {
     pub block_height: u64,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Clone, Debug)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 pub struct Tx {
     pub position: u32,
     pub other_storage_position: u32,
@@ -118,8 +118,7 @@ pub fn get_txs<A: Api, S: ReadonlyStorage>(
     txs.map(|txs| (txs, store.len() as u64))
 }
 
-#[allow(clippy::too_many_arguments)] // We just need them
-pub fn store_tx<S: Storage>(
+pub fn store_txs<S: Storage>(
     store: &mut S,
     fee: Uint128,
     from: &CanonicalAddr,
