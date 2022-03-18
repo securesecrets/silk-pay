@@ -133,10 +133,12 @@ fn confirm_address<S: Storage, A: Api, Q: Querier>(
     let config: Config = TypedStoreMut::attach(&mut deps.storage)
         .load(CONFIG_KEY)
         .unwrap();
-    authorize(env.message.sender.clone(), config.sscrt.address)?;
-    if !amount.is_zero() {
-        return Err(StdError::generic_err("Amount sent in should be zero."));
-    }
+    correct_amount_of_token(
+        amount,
+        Uint128(0),
+        env.message.sender.clone(),
+        config.sscrt.address,
+    )?;
 
     let (mut from_tx, mut to_tx) = verify_txs_for_confirm_address(
         &mut deps.storage,
@@ -173,10 +175,12 @@ fn cancel<S: Storage, A: Api, Q: Querier>(
     let config: Config = TypedStore::attach(&mut deps.storage)
         .load(CONFIG_KEY)
         .unwrap();
-    authorize(env.message.sender.clone(), config.sscrt.address.clone())?;
-    if !amount.is_zero() {
-        return Err(StdError::generic_err("Amount sent in should be zero."));
-    }
+    correct_amount_of_token(
+        amount,
+        Uint128(0),
+        env.message.sender.clone(),
+        config.sscrt.address.clone(),
+    )?;
     let mut messages: Vec<CosmosMsg> = vec![];
     messages.push(snip20::transfer_msg(
         from_tx.creator.clone(),
@@ -273,12 +277,17 @@ fn accept_new_admin_nomination<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn correct_fee_paid(amount: Uint128, token_address: HumanAddr, config: Config) -> StdResult<()> {
-    if amount != config.fee {
-        return Err(StdError::generic_err("Incorrect fee amount."));
+fn correct_amount_of_token(
+    amount_received: Uint128,
+    amount_wanted: Uint128,
+    token_received: HumanAddr,
+    token_wanted: HumanAddr,
+) -> StdResult<()> {
+    if amount_received != amount_wanted {
+        return Err(StdError::generic_err("Wrong amount received."));
     }
-    if token_address != config.sscrt.address {
-        return Err(StdError::generic_err("Fee must be paid in sscrt."));
+    if token_received != token_wanted {
+        return Err(StdError::generic_err("Wrong token received."));
     }
 
     Ok(())
@@ -319,7 +328,12 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
     let config: Config = TypedStore::attach(&mut deps.storage)
         .load(CONFIG_KEY)
         .unwrap();
-    correct_fee_paid(amount, env.message.sender.clone(), config.clone())?;
+    correct_amount_of_token(
+        amount,
+        config.fee,
+        env.message.sender.clone(),
+        config.sscrt.address,
+    )?;
 
     let mut messages: Vec<CosmosMsg> = vec![];
     let register_token_msg: Option<CosmosMsg> = register_token(
@@ -363,7 +377,12 @@ fn create_send_request<S: Storage, A: Api, Q: Querier>(
     let config: Config = TypedStore::attach(&mut deps.storage)
         .load(CONFIG_KEY)
         .unwrap();
-    correct_fee_paid(amount, env.message.sender.clone(), config.clone())?;
+    correct_amount_of_token(
+        amount,
+        config.fee,
+        env.message.sender.clone(),
+        config.sscrt.address,
+    )?;
 
     let mut messages: Vec<CosmosMsg> = vec![];
     let register_token_msg: Option<CosmosMsg> = register_token(
@@ -660,6 +679,121 @@ mod tests {
     }
 
     #[test]
+    fn test_confirm_address() {
+        let (_init_result, mut deps) = init_helper();
+        let env = mock_env(mock_user_address(), &[]);
+        let description = Some("Mercy".to_string());
+
+        // when send receive exists
+        let send_amount: Uint128 = Uint128(555_555);
+        let receive_msg = ReceiveMsg::CreateSendRequest {
+            address: mock_contract_initiator_address(),
+            send_amount: send_amount,
+            description: description.clone(),
+            token: mock_silk(),
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_fee(),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
+        handle_result.unwrap();
+        // = when user sends in a positive amount
+        let receive_msg = ReceiveMsg::ConfirmAddress { position: 1 };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(5),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        // = * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Wrong amount received.".to_string(),
+                backtrace: None
+            }
+        );
+        // = when user sends in a zero amount
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(0),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // == when user sends in a non-sscrt token
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        // == * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Wrong token received.".to_string(),
+                backtrace: None
+            }
+        );
+        // == when user sends in sscrt token
+        let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
+        // === when user tries to confirm address of a Tx that does not exist
+        // === * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "AppendStorage access out of bounds".to_string(),
+                backtrace: None
+            }
+        );
+        // === when user tries to confirm address of a Tx that exists
+        // ==== when user tries to confirm Tx that is pending address confirmation
+        // ==== * it updates the Tx and counter Tx to pending payment
+        let receive_msg = ReceiveMsg::ConfirmAddress { position: 0 };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(0),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result_unwrapped = handle(
+            &mut deps,
+            mock_env(mock_sscrt().address, &[]),
+            handle_msg.clone(),
+        )
+        .unwrap();
+        assert_eq!(handle_result_unwrapped.messages, vec![]);
+        let from_tx = tx_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        let to_tx = tx_at_position(
+            &mut deps.storage,
+            &from_tx.to,
+            from_tx.other_storage_position,
+        )
+        .unwrap();
+        assert_eq!(from_tx.status, 1);
+        assert_eq!(to_tx.status, 1);
+
+        // ==== when user tries to confirm Tx that is not pending address confirmation
+        // ==== * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_sscrt().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Tx not waiting for address confirmation.".to_string(),
+                backtrace: None
+            }
+        );
+    }
+
+    #[test]
     fn test_create_send_request() {
         let (_init_result, mut deps) = init_helper();
         let env = mock_env(mock_user_address(), &[]);
@@ -682,7 +816,7 @@ mod tests {
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::GenericErr {
-                msg: "Incorrect fee amount.".to_string(),
+                msg: "Wrong amount received.".to_string(),
                 backtrace: None
             }
         );
@@ -699,7 +833,7 @@ mod tests {
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::GenericErr {
-                msg: "Fee must be paid in sscrt.".to_string(),
+                msg: "Wrong token received.".to_string(),
                 backtrace: None
             }
         );
