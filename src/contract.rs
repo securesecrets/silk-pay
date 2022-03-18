@@ -84,7 +84,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     msg: Binary,
 ) -> StdResult<HandleResponse> {
     let msg: ReceiveMsg = from_binary(&msg)?;
-    match msg {
+    let response = match msg {
         ReceiveMsg::Cancel { position } => cancel(deps, &env, from, amount, position),
         ReceiveMsg::ConfirmAddress { position } => {
             confirm_address(deps, &env, from, amount, position)
@@ -120,7 +120,8 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             description,
             token,
         ),
-    }
+    };
+    pad_response(response)
 }
 
 fn confirm_address<S: Storage, A: Api, Q: Querier>(
@@ -431,6 +432,30 @@ fn nominate_new_admin<S: Storage, A: Api, Q: Querier>(
         log: vec![],
         data: None,
     })
+}
+
+fn pad_response(response: StdResult<HandleResponse>) -> StdResult<HandleResponse> {
+    response.map(|mut response| {
+        response.data = response.data.map(|mut data| {
+            space_pad(BLOCK_SIZE, &mut data.0);
+            data
+        });
+        response
+    })
+}
+
+// Take a Vec<u8> and pad it up to a multiple of `block_size`, using spaces at the end.
+fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
+    let len = message.len();
+    let surplus = len % block_size;
+    if surplus == 0 {
+        return message;
+    }
+
+    let missing = block_size - surplus;
+    message.reserve(missing);
+    message.extend(std::iter::repeat(b' ').take(missing));
+    message
 }
 
 fn txs<S: Storage, A: Api, Q: Querier>(
