@@ -89,6 +89,21 @@ fn receive<S: Storage, A: Api, Q: Querier>(
         ReceiveMsg::ConfirmAddress { position } => {
             confirm_address(deps, &env, from, amount, position)
         }
+        ReceiveMsg::CreateReceiveRequest {
+            address,
+            send_amount,
+            description,
+            token,
+        } => create_receive_request(
+            deps,
+            &env,
+            from,
+            amount,
+            address,
+            send_amount,
+            description,
+            token,
+        ),
         ReceiveMsg::CreateSendRequest {
             address,
             send_amount,
@@ -105,21 +120,6 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             token,
         ),
         ReceiveMsg::SendPayment { position } => send_payment(deps, &env, from, amount, position),
-        ReceiveMsg::CreateReceiveRequest {
-            address,
-            send_amount,
-            description,
-            token,
-        } => create_receive_request(
-            deps,
-            &env,
-            from,
-            amount,
-            address,
-            send_amount,
-            description,
-            token,
-        ),
     };
     pad_response(response)
 }
@@ -167,12 +167,6 @@ fn cancel<S: Storage, A: Api, Q: Querier>(
     amount: Uint128,
     position: u32,
 ) -> StdResult<HandleResponse> {
-    let (mut from_tx, mut to_tx) = verify_txs_for_cancel(
-        &mut deps.storage,
-        &deps.api.canonical_address(&from)?,
-        position,
-    )?;
-    // Send refund to the creator
     let config: Config = TypedStore::attach(&mut deps.storage)
         .load(CONFIG_KEY)
         .unwrap();
@@ -182,6 +176,12 @@ fn cancel<S: Storage, A: Api, Q: Querier>(
         env.message.sender.clone(),
         config.sscrt.address.clone(),
     )?;
+    let (mut from_tx, mut to_tx) = verify_txs_for_cancel(
+        &mut deps.storage,
+        &deps.api.canonical_address(&from)?,
+        position,
+    )?;
+    // Send refund to the creator
     let mut messages: Vec<CosmosMsg> = vec![];
     messages.push(snip20::transfer_msg(
         from_tx.creator.clone(),
@@ -701,6 +701,199 @@ mod tests {
         assert_eq!(config.admin, mock_user_address());
         // = * it sets the new admin nomination to None
         assert_eq!(config.new_admin_nomination, None);
+    }
+
+    #[test]
+    fn test_cancel() {
+        let (_init_result, mut deps) = init_helper();
+        let env = mock_env(mock_user_address(), &[]);
+        let description = Some("Mercy".to_string());
+
+        // when pending address confirmation
+        let send_amount: Uint128 = Uint128(555_555);
+        let receive_msg = ReceiveMsg::CreateSendRequest {
+            address: mock_contract_initiator_address(),
+            send_amount: send_amount,
+            description: description.clone(),
+            token: mock_silk(),
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_fee(),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
+        handle_result.unwrap();
+        // = when user sends in a positive amount
+        let receive_msg = ReceiveMsg::Cancel { position: 1 };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(5),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        // = * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Wrong amount received.".to_string(),
+                backtrace: None
+            }
+        );
+        // = when user sends in a zero amount
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(0),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // == when user sends in a non-sscrt token
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        // == * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Wrong token received.".to_string(),
+                backtrace: None
+            }
+        );
+        // == when user sends in sscrt token
+        let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
+        // === when user tries to cancel a Tx that does not exist
+        // === * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "AppendStorage access out of bounds".to_string(),
+                backtrace: None
+            }
+        );
+        // === when user tries to cancel Tx that exists
+        // ==== when user tries to cancel Tx that is pending address confirmation
+        let receive_msg = ReceiveMsg::Cancel { position: 0 };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(0),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result_unwrapped = handle(
+            &mut deps,
+            mock_env(mock_sscrt().address, &[]),
+            handle_msg.clone(),
+        )
+        .unwrap();
+        let mut from_tx = tx_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        let mut to_tx = tx_at_position(
+            &mut deps.storage,
+            &from_tx.to,
+            from_tx.other_storage_position,
+        )
+        .unwrap();
+        // ==== * it sends the fee back to the creator
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        assert_eq!(
+            handle_result_unwrapped.messages,
+            vec![snip20::transfer_msg(
+                from_tx.creator.clone(),
+                from_tx.fee,
+                None,
+                BLOCK_SIZE,
+                config.sscrt.contract_hash,
+                config.sscrt.address,
+            )
+            .unwrap()]
+        );
+        // ==== * it updates the Tx and counter Tx to cancdl
+        assert_eq!(from_tx.status, 2);
+        assert_eq!(to_tx.status, 2);
+
+        // ==== when user tries to cancel Tx that is cancelled
+        // ==== * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_sscrt().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Tx already cancelled.".to_string(),
+                backtrace: None
+            }
+        );
+        // ==== when user tries to cancel Tx that is pending payment
+        from_tx.status = 1;
+        to_tx.status = 1;
+        update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx).unwrap();
+        update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx).unwrap();
+        let receive_msg = ReceiveMsg::Cancel { position: 0 };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(0),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result_unwrapped = handle(
+            &mut deps,
+            mock_env(mock_sscrt().address, &[]),
+            handle_msg.clone(),
+        )
+        .unwrap();
+        let mut from_tx = tx_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        let mut to_tx = tx_at_position(
+            &mut deps.storage,
+            &from_tx.to,
+            from_tx.other_storage_position,
+        )
+        .unwrap();
+        // ==== * it sends the fee back to the creator
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        assert_eq!(
+            handle_result_unwrapped.messages,
+            vec![snip20::transfer_msg(
+                from_tx.creator.clone(),
+                from_tx.fee,
+                None,
+                BLOCK_SIZE,
+                config.sscrt.contract_hash,
+                config.sscrt.address,
+            )
+            .unwrap()]
+        );
+        // ==== * it updates the Tx and counter Tx to cancel
+        assert_eq!(from_tx.status, 2);
+        assert_eq!(to_tx.status, 2);
+        // ==== when user tries to cancel Tx that is finalized
+        from_tx.status = 3;
+        to_tx.status = 3;
+        update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx).unwrap();
+        update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx).unwrap();
+        // ==== * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_sscrt().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Tx already finalized.".to_string(),
+                backtrace: None
+            }
+        );
     }
 
     #[test]
