@@ -1012,6 +1012,135 @@ mod tests {
     }
 
     #[test]
+    fn test_create_receive_request() {
+        let (_init_result, mut deps) = init_helper();
+        let env = mock_env(mock_user_address(), &[]);
+        let description = Some("Mercy".to_string());
+
+        // when incorrect fee amount is sent in
+        let receive_msg = ReceiveMsg::CreateReceiveRequest {
+            address: mock_user_address(),
+            send_amount: Uint128(555555),
+            description: description.clone(),
+            token: mock_silk(),
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(555),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Wrong amount received.".to_string(),
+                backtrace: None
+            }
+        );
+
+        // when correct fee amount is sent in
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_fee(),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // = when incorrect fee token is sent in
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Wrong token received.".to_string(),
+                backtrace: None
+            }
+        );
+
+        // = when correct fee token is sent in
+        let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
+        // == when sender sets the receiver to themselves
+        // == * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "From and to addresses must be different.".to_string(),
+                backtrace: None
+            }
+        );
+
+        // == when sender sets the receiver to somebody else
+        let send_amount: Uint128 = Uint128(555_555);
+        let receive_msg = ReceiveMsg::CreateReceiveRequest {
+            address: mock_contract_initiator_address(),
+            send_amount: send_amount,
+            description: description.clone(),
+            token: mock_silk(),
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_fee(),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
+        let handle_result_unwrapped = handle_result.unwrap();
+        assert_eq!(handle_result_unwrapped.messages, vec![]);
+        // == * it creates the txs
+        let from_tx = tx_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        let to_tx = tx_at_position(
+            &mut deps.storage,
+            &from_tx.to,
+            from_tx.other_storage_position,
+        )
+        .unwrap();
+        assert_eq!(
+            from_tx,
+            Tx {
+                position: 0,
+                other_storage_position: 0,
+                fee: mock_fee(),
+                from: deps
+                    .api
+                    .canonical_address(&mock_contract_initiator_address())
+                    .unwrap(),
+                to: deps.api.canonical_address(&mock_user_address()).unwrap(),
+                creator: mock_user_address(),
+                amount: send_amount,
+                token: mock_silk(),
+                description: description.clone(),
+                status: 1,
+                block_time: env.block.time,
+                block_height: env.block.height,
+            }
+        );
+        assert_eq!(
+            to_tx,
+            Tx {
+                position: 0,
+                other_storage_position: 0,
+                fee: mock_fee(),
+                from: deps
+                    .api
+                    .canonical_address(&mock_contract_initiator_address())
+                    .unwrap(),
+                to: deps.api.canonical_address(&mock_user_address()).unwrap(),
+                creator: mock_user_address(),
+                amount: send_amount,
+                token: mock_silk(),
+                description: description,
+                status: 1,
+                block_time: env.block.time,
+                block_height: env.block.height,
+            }
+        );
+    }
+
+    #[test]
     fn test_create_send_request() {
         let (_init_result, mut deps) = init_helper();
         let env = mock_env(mock_user_address(), &[]);
