@@ -278,7 +278,7 @@ fn accept_new_admin_nomination<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn correct_amount_of_token(
+pub fn correct_amount_of_token(
     amount_received: Uint128,
     amount_wanted: Uint128,
     token_received: HumanAddr,
@@ -1291,6 +1291,209 @@ mod tests {
         handle_result.unwrap();
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
         assert_eq!(config.new_admin_nomination, Some(mock_user_address()))
+    }
+
+    #[test]
+    fn test_send_payment() {
+        let (_init_result, mut deps) = init_helper();
+        let env = mock_env(mock_user_address(), &[]);
+        let description = Some("Mercy".to_string());
+
+        // when pending address tx exists
+        let send_amount: Uint128 = Uint128(555_555);
+        let receive_msg = ReceiveMsg::CreateSendRequest {
+            address: mock_contract_initiator_address(),
+            send_amount: send_amount,
+            description: description.clone(),
+            token: mock_silk(),
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_fee(),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
+        handle_result.unwrap();
+
+        // = when user tries to send payment for tx that does not eist
+        let receive_msg = ReceiveMsg::SendPayment { position: 1 };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_fee(),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // = * it raises an error
+        let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "AppendStorage access out of bounds".to_string(),
+                backtrace: None
+            }
+        );
+
+        // = when user tries to send payment for tx that exists
+        let receive_msg = ReceiveMsg::SendPayment { position: 0 };
+        // == when user sends in an amount that does not match the tx
+        // == * it raises an error
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(send_amount.u128() + 1),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        // = * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Wrong amount received.".to_string(),
+                backtrace: None
+            }
+        );
+        // = when user sends in the correct amount
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: send_amount,
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // == when user sends in the wrong token
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_sscrt().address, &[]),
+            handle_msg.clone(),
+        );
+        // == * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Wrong token received.".to_string(),
+                backtrace: None
+            }
+        );
+        // == when user sends in the right token
+        let handle_result = handle(&mut deps, mock_env(mock_silk().address, &[]), handle_msg);
+        // ==== when user sends payment for Tx that is pending address confirmation
+        // ==== * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Tx status at that position is incorrect.".to_string(),
+                backtrace: None
+            }
+        );
+
+        // ==== when user sends payment for Tx that is cancelled
+        let mut from_tx = tx_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        let mut to_tx = tx_at_position(
+            &mut deps.storage,
+            &from_tx.to,
+            from_tx.other_storage_position,
+        )
+        .unwrap();
+        from_tx.status = 2;
+        to_tx.status = 2;
+        update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx.clone()).unwrap();
+        update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx.clone()).unwrap();
+        // ==== * it raises an error
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: send_amount,
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_silk().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Tx status at that position is incorrect.".to_string(),
+                backtrace: None
+            }
+        );
+
+        // ==== when user sends payment for Tx that is already finalized
+        from_tx.status = 3;
+        to_tx.status = 3;
+        update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx.clone()).unwrap();
+        update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx.clone()).unwrap();
+        // ==== * it raises an error
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: send_amount,
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_silk().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::GenericErr {
+                msg: "Tx status at that position is incorrect.".to_string(),
+                backtrace: None
+            }
+        );
+
+        // ==== when user sends payment for Tx that is pending payment
+        from_tx.status = 1;
+        to_tx.status = 1;
+        update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx.clone()).unwrap();
+        update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx).unwrap();
+        // ==== * it sends payment to receiver
+        // ==== * it sends fee to treasury
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: send_amount,
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result_unwrapped =
+            handle(&mut deps, mock_env(mock_silk().address, &[]), handle_msg).unwrap();
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        assert_eq!(
+            handle_result_unwrapped.messages,
+            vec![
+                snip20::transfer_msg(
+                    config.treasury_address,
+                    from_tx.fee,
+                    None,
+                    BLOCK_SIZE,
+                    config.sscrt.contract_hash,
+                    config.sscrt.address,
+                )
+                .unwrap(),
+                snip20::transfer_msg(
+                    deps.api.human_address(&from_tx.to).unwrap(),
+                    from_tx.amount,
+                    None,
+                    BLOCK_SIZE,
+                    from_tx.token.contract_hash,
+                    from_tx.token.address,
+                )
+                .unwrap()
+            ]
+        );
+        // ==== * it updates the status to finalized
+        let from_tx = tx_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        let to_tx = tx_at_position(
+            &mut deps.storage,
+            &from_tx.to,
+            from_tx.other_storage_position,
+        )
+        .unwrap();
+        assert_eq!(from_tx.status, 3);
+        assert_eq!(to_tx.status, 3);
     }
 
     #[test]
