@@ -1,4 +1,5 @@
 use crate::constants::PREFIX_TXS;
+use crate::contract::correct_amount_of_token;
 use crate::state::SecretContract;
 use cosmwasm_std::{
     Api, CanonicalAddr, HumanAddr, ReadonlyStorage, StdError, StdResult, Storage, Uint128,
@@ -54,37 +55,7 @@ impl Tx {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-#[repr(u8)]
-enum StatusCode {
-    PendingAddressConfirmation = 0,
-    PendingPayment = 1,
-    Cancelled = 2,
-    Finalized = 3,
-}
-
-impl StatusCode {
-    fn to_u8(self) -> u8 {
-        self as u8
-    }
-
-    fn from_u8(n: u8) -> StdResult<Self> {
-        use StatusCode::*;
-        match n {
-            0 => Ok(PendingAddressConfirmation),
-            1 => Ok(PendingPayment),
-            2 => Ok(Cancelled),
-            3 => Ok(Finalized),
-            other => Err(StdError::generic_err(format!(
-                "Unexpected Status code in transaction history: {} Storage is corrupted.",
-                other
-            ))),
-        }
-    }
-}
-
 // Storage functions:
-
 pub fn get_txs<A: Api, S: ReadonlyStorage>(
     api: &A,
     storage: &S,
@@ -195,24 +166,21 @@ pub fn verify_txs<S: Storage>(
 ) -> StdResult<(Tx, Tx)> {
     let from_tx = tx_at_position(store, address, position)?;
     let to_tx = tx_at_position(store, &from_tx.to, from_tx.other_storage_position)?;
+    correct_amount_of_token(
+        amount,
+        to_tx.amount,
+        token_address,
+        to_tx.token.address.clone(),
+    )?;
+
     if to_tx.from != address.clone() {
         return Err(StdError::generic_err(
             "From address at that position is incorrect.",
         ));
     }
-    if to_tx.amount != amount {
-        return Err(StdError::generic_err(
-            "Amount at that position is incorrect.",
-        ));
-    }
     if to_tx.status != status {
         return Err(StdError::generic_err(
             "Tx status at that position is incorrect.",
-        ));
-    }
-    if to_tx.token.address != token_address {
-        return Err(StdError::generic_err(
-            "Token address at that position is incorrect.",
         ));
     }
 
