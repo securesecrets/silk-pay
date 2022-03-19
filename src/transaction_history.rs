@@ -1,3 +1,4 @@
+use crate::authorize::authorize;
 use crate::constants::PREFIX_TXS;
 use crate::contract::correct_amount_of_token;
 use crate::state::SecretContract;
@@ -204,14 +205,15 @@ pub fn verify_txs_for_cancel<S: Storage>(
     Ok((from_tx, to_tx))
 }
 
-pub fn verify_txs_for_confirm_address<S: Storage>(
+pub fn verify_txs_for_confirm_address<A: Api, S: Storage>(
+    api: &A,
     store: &mut S,
     address: &CanonicalAddr,
     position: u32,
 ) -> StdResult<(Tx, Tx)> {
     let to_tx = tx_at_position(store, address, position)?;
     let from_tx = tx_at_position(store, &to_tx.from, to_tx.other_storage_position)?;
-
+    authorize(api.human_address(&to_tx.to)?, api.human_address(address)?)?;
     if to_tx.status != 0 {
         return Err(StdError::generic_err(
             "Tx not waiting for address confirmation.",

@@ -142,6 +142,7 @@ fn confirm_address<S: Storage, A: Api, Q: Querier>(
     )?;
 
     let (mut from_tx, mut to_tx) = verify_txs_for_confirm_address(
+        &deps.api,
         &mut deps.storage,
         &deps.api.canonical_address(&from)?,
         position,
@@ -965,11 +966,30 @@ mod tests {
         );
         // === when user tries to confirm address of a Tx that exists
         // ==== when user tries to confirm Tx that is pending address confirmation
-        // ==== * it updates the Tx and counter Tx to pending payment
+        // ===== when user tries to confirm Tx that that they are not the receiver of
         let receive_msg = ReceiveMsg::ConfirmAddress { position: 0 };
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
+            amount: Uint128(0),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_sscrt().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // ===== when user tries to confirm Tx that that they are the receiver of
+        // ===== * it updates the Tx and counter Tx to pending payment
+        let receive_msg = ReceiveMsg::ConfirmAddress { position: 0 };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_contract_initiator_address(),
+            from: mock_contract_initiator_address(),
             amount: Uint128(0),
             msg: to_binary(&receive_msg).unwrap(),
         };

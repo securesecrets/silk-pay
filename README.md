@@ -79,6 +79,24 @@ secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"c
 
 # Query Txs
 secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"txs": {"address": "secret1u52q5le8tmgejkt5cfsgd0pmldkzxq3eerjp9d", "key": "DoTheRightThing.", "page": 0, "page_size": 50}}'
+
+# Nominate new admin
+secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"nominate_new_admin":{"address": "secret1u5dv38d8qvf86z3kwyd9xsqd4eqf3juxlxh970"}}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+
+# Accept new admin nomination
+secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"accept_new_admin_nomination":{}}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+
+# Update fee
+secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"update_fee":{ "fee": "555" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+
+# Update treasury address
+secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"update_treasury_address":{ "address": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+
+# Create send request
+secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "555", "msg": "eyJjcmVhdGVfc2VuZF9yZXF1ZXN0IjogeyJhZGRyZXNzIjogInNlY3JldDF1NTJxNWxlOHRtZ2Vqa3Q1Y2ZzZ2QwcG1sZGt6eHEzZWVyanA5ZCIsICJzZW5kX2Ftb3VudCI6ICI1NTU1NTUiLCAiZGVzY3JpcHRpb24iOiAiYXBvY2FseXB0byIsICJ0b2tlbiI6IHsiYWRkcmVzcyI6ICJzZWNyZXQxOHI1c3ptYThobTkzcHZ4Nmx3cGp3eXhydXcyN2UwazU3dG5jZnkiLCAiY29udHJhY3RfaGFzaCI6ICIzNUY1REIyQkM1Q0Q1NjgxNUQxMEM3QTU2N0Q2ODI3QkVDQ0I4RUFGNDVCQzNGQTAxNjkzMEM0QTgyMDlFQTY5In19fQ==" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+
+# Confirm address
+secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "0", "msg": "eyJjb25maXJtX2FkZHJlc3MiOiB7InBvc2l0aW9uIjogMH19" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 ## References
