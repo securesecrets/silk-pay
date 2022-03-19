@@ -157,7 +157,8 @@ pub fn update_tx<S: Storage>(store: &mut S, address: &CanonicalAddr, tx: Tx) -> 
 }
 
 // Verify the Tx and then verify it's counter Tx
-pub fn verify_txs<S: Storage>(
+pub fn verify_txs<A: Api, S: Storage>(
+    api: &A,
     store: &mut S,
     address: &CanonicalAddr,
     amount: Uint128,
@@ -173,12 +174,7 @@ pub fn verify_txs<S: Storage>(
         token_address,
         to_tx.token.address.clone(),
     )?;
-
-    if to_tx.from != address.clone() {
-        return Err(StdError::generic_err(
-            "From address at that position is incorrect.",
-        ));
-    }
+    authorize(api.human_address(&to_tx.from)?, api.human_address(address)?)?;
     if to_tx.status != status {
         return Err(StdError::generic_err(
             "Tx status at that position is incorrect.",

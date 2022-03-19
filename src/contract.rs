@@ -214,6 +214,7 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
     position: u32,
 ) -> StdResult<HandleResponse> {
     let (mut from_tx, mut to_tx) = verify_txs(
+        &deps.api,
         &mut deps.storage,
         &deps.api.canonical_address(&from)?,
         amount,
@@ -1465,8 +1466,22 @@ mod tests {
         to_tx.status = 1;
         update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx.clone()).unwrap();
         update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx).unwrap();
-        // ==== * it sends payment to receiver
-        // ==== * it sends fee to treasury
+        // ===== when user user is not the from for that Tx
+        // ===== * it raises an unauthorized error
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_contract_initiator_address(),
+            from: mock_contract_initiator_address(),
+            amount: send_amount,
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_silk().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+        // ===== when user is the the from for that Tx
+        // ===== * it sends payment to receiver
+        // ===== * it sends fee to treasury
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
