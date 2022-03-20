@@ -337,16 +337,6 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
         env.message.sender.clone(),
         config.sscrt.address,
     )?;
-
-    let mut messages: Vec<CosmosMsg> = vec![];
-    let register_token_msg: Option<CosmosMsg> = register_token(
-        &mut deps.storage,
-        env.contract_code_hash.clone(),
-        token.clone(),
-    )?;
-    if register_token_msg.is_some() {
-        messages.push(register_token_msg.unwrap())
-    }
     store_txs(
         &mut deps.storage,
         config.fee,
@@ -354,14 +344,20 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&from)?,
         from,
         send_amount,
-        token,
+        token.clone(),
         description,
         1,
         &env.block,
     )?;
+    let mut messages: Vec<CosmosMsg> = vec![];
+    let register_token_msg: Option<CosmosMsg> =
+        register_token(&mut deps.storage, env.contract_code_hash.clone(), token)?;
+    if register_token_msg.is_some() {
+        messages.push(register_token_msg.unwrap())
+    }
 
     Ok(HandleResponse {
-        messages: vec![],
+        messages,
         log: vec![],
         data: None,
     })
@@ -386,16 +382,6 @@ fn create_send_request<S: Storage, A: Api, Q: Querier>(
         env.message.sender.clone(),
         config.sscrt.address,
     )?;
-
-    let mut messages: Vec<CosmosMsg> = vec![];
-    let register_token_msg: Option<CosmosMsg> = register_token(
-        &mut deps.storage,
-        env.contract_code_hash.clone(),
-        token.clone(),
-    )?;
-    if register_token_msg.is_some() {
-        messages.push(register_token_msg.unwrap())
-    }
     store_txs(
         &mut deps.storage,
         config.fee,
@@ -403,14 +389,20 @@ fn create_send_request<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&address)?,
         from,
         send_amount,
-        token,
+        token.clone(),
         description,
         0,
         &env.block,
     )?;
+    let mut messages: Vec<CosmosMsg> = vec![];
+    let register_token_msg: Option<CosmosMsg> =
+        register_token(&mut deps.storage, env.contract_code_hash.clone(), token)?;
+    if register_token_msg.is_some() {
+        messages.push(register_token_msg.unwrap())
+    }
 
     Ok(HandleResponse {
-        messages: vec![],
+        messages,
         log: vec![],
         data: None,
     })
@@ -1105,7 +1097,17 @@ mod tests {
         };
         let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
         let handle_result_unwrapped = handle_result.unwrap();
-        assert_eq!(handle_result_unwrapped.messages, vec![]);
+        assert_eq!(
+            handle_result_unwrapped.messages,
+            vec![snip20::register_receive_msg(
+                mock_env(mock_sscrt().address, &[]).contract_code_hash,
+                None,
+                BLOCK_SIZE,
+                mock_silk().contract_hash,
+                mock_silk().address,
+            )
+            .unwrap()]
+        );
         // == * it creates the txs
         let from_tx = tx_at_position(
             &mut deps.storage,
@@ -1234,7 +1236,18 @@ mod tests {
         };
         let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
         let handle_result_unwrapped = handle_result.unwrap();
-        assert_eq!(handle_result_unwrapped.messages, vec![]);
+        // == * it registers a token if it is not registered already
+        assert_eq!(
+            handle_result_unwrapped.messages,
+            vec![snip20::register_receive_msg(
+                mock_env(mock_sscrt().address, &[]).contract_code_hash,
+                None,
+                BLOCK_SIZE,
+                mock_silk().contract_hash,
+                mock_silk().address,
+            )
+            .unwrap()]
+        );
         // == * it creates the txs
         let from_tx = tx_at_position(
             &mut deps.storage,
