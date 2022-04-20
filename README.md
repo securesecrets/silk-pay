@@ -204,6 +204,7 @@ secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"t
 1. Nominate new admin
 
 * Admin only
+
 | Name    | Type      | Description                     | Optional |
 |---------|-----------|---------------------------------|----------|
 | address | HumanAddr | address of new admin nomination | no       |
@@ -237,6 +238,7 @@ secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"up
 4. Update treasury address
 
 * Admin only
+
 | Name    | Type      | Description             | Optional |
 |---------|-----------|-------------------------|----------|
 | address | HumanAddr | address to send fees to | no       |
