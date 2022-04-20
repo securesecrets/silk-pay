@@ -34,6 +34,7 @@
     </li>
     <li><a href="#usage">Usage</a>
       <ul>
+        <li><a href="#init">Init</a></li>
         <li><a href="#queries">Queries</a></li>
         <li><a href="#handle-functions">Handle functions</a></li>
       </ul>
@@ -146,6 +147,15 @@ secretcli tx compute instantiate $CODE_ID "$INIT" --from a --label "SILK Pay" -y
 
 You can decode and encode the msg used in the send functions below via https://www.base64encode.org/
 
+### Init
+
+| Name             | Type           | Description                                       | Optional |
+|------------------|----------------|---------------------------------------------------|----------|
+| fee              | Uint128        | sscrt fee for using safe send and receive request | no       |
+| shade            | SecretContract | to verify user's viewing key to view txs          | no       |
+| sscrt            | SecretContract |                                                   | no       |
+| treasury_address | HumanAddr      | fee sent here when sender sends payment           | no       |
+
 ### Queries
 
 1. Query config
@@ -153,18 +163,50 @@ You can decode and encode the msg used in the send functions below via https://w
 ``` sh
 secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"config": {}}'
 ```
+##### Response
+```json
+{
+  "config": {
+    "admin": "HumanAddr",
+    "fee": "Uint128",
+    "new_admin_nomination": "HumanAddr",
+    "shade": "SecretContract",
+    "sscrt": "SecretContract",
+    "treasury_address": "HumanAddr"
+  }
+}
+```
 
 2. Query user's txs
-* The viewing key will be the user's viewing key for the SHADE contract
+
+| Name      | Type      | Description                    | Optional |
+|-----------|-----------|--------------------------------|----------|
+| address   | HumanAddr | address of user                | no       |
+| key       | String    | user's SHD token viewing key   | no       |
+| page      | u32       | page number starting from zero | no       |
+| page_size | u32       | number of txs per page         | no       |
 
 ``` sh
 secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"txs": {"address": "secret1mmhhzccndqplwp9juj6z3hy0eaqh4pf395e2my", "key": "DoTheRightThing.", "page": 0, "page_size": 50}}'
+```
+##### Response
+```json
+{
+  "txs": {
+    "txs": "Vec<HumanizedTx>",
+    "total": "Option<u64>",
+  }
+}
 ```
 
 ### Handle functions
 
 1. Nominate new admin
+
 * Admin only
+| Name    | Type      | Description                     | Optional |
+|---------|-----------|---------------------------------|----------|
+| address | HumanAddr | address of new admin nomination | no       |
 
 ``` sh
 # Nominate new admin
@@ -172,32 +214,50 @@ secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"no
 ```
 
 2. Accept admin nomination
-* Can only be called by nominated address
+
+* Can only be called by nominated address and no params required
 
 ``` sh
 secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"accept_new_admin_nomination":{}}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 3. Update fee
+
 * Admin only
 * Each tx keeps a track of the fee that was paid, so this can be changed without any concern
+
+| Name | Type    | Description   | Optional |
+|------|---------|---------------|----------|
+| fee  | Uint128 | new sscrt fee | no       |
 
 ``` sh
 secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"update_fee":{ "fee": "555" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 4. Update treasury address
+
 * Admin only
+| Name    | Type      | Description             | Optional |
+|---------|-----------|-------------------------|----------|
+| address | HumanAddr | address to send fees to | no       |
 
 ``` sh
 secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"update_treasury_address":{ "address": "secret1fwulevfv3cs4ec3rzv9cthu97pf6us00rzmdex" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 5. Create send request
+
 * via SSCRT
 * Sender creates a Safe Send Tx, sends fee in SSCRT, sets details of Tx.
 * If token is not registered, it is registered.
 * Tx status is 0 (pending address confirmation).
+
+| Name        | Type           | Description         | Optional |
+|-------------|----------------|---------------------|----------|
+| address     | HumanAddr      | address of receiver | no       |
+| description | String         | description for tx  | yes      |
+| send_amount | Uint128        | amount to send      | no       |
+| token       | SecretContract | token to send       | no       |
 
 ``` sh
 secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "555", "msg": "eyJjcmVhdGVfc2VuZF9yZXF1ZXN0IjogeyJhZGRyZXNzIjogInNlY3JldDFtbWhoemNjbmRxcGx3cDlqdWo2ejNoeTBlYXFoNHBmMzk1ZTJteSIsICJzZW5kX2Ftb3VudCI6ICI1NTU1NTUiLCAiZGVzY3JpcHRpb24iOiAiYXBvY2FseXB0byIsICJ0b2tlbiI6IHsiYWRkcmVzcyI6ICJzZWNyZXQxOHI1c3ptYThobTkzcHZ4Nmx3cGp3eXhydXcyN2UwazU3dG5jZnkiLCAiY29udHJhY3RfaGFzaCI6ICIzNUY1REIyQkM1Q0Q1NjgxNUQxMEM3QTU2N0Q2ODI3QkVDQ0I4RUFGNDVCQzNGQTAxNjkzMEM0QTgyMDlFQTY5In19fQ==" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
@@ -207,32 +267,54 @@ secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"se
 * via SSCRT
 * Tx status updated to 1 (pending payment).
 
+| Name     | Type | Description                       | Optional |
+|----------|------|-----------------------------------|----------|
+| position | u32  | position of Tx in user's Tx array | no       |
+
 ``` sh
 secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "0", "msg": "eyJjb25maXJtX2FkZHJlc3MiOiB7InBvc2l0aW9uIjogMH19" }}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 7. Create receive request
+
 * via SSCRT
 * Receiver create a Receive Request Tx via SSCRT, sends fee in SSCRT, sets details of Tx.
 * If token is not registered, it is registered.
 * Tx status is 1 (pending payment).
+
+| Name        | Type           | Description         | Optional |
+|-------------|----------------|---------------------|----------|
+| address     | HumanAddr      | address of sender   | no       |
+| description | String         | description for tx  | yes      |
+| send_amount | Uint128        | amount to send      | no       |
+| token       | SecretContract | token to send       | no       |
 
 ``` sh
 secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "555", "msg": "eyJjcmVhdGVfcmVjZWl2ZV9yZXF1ZXN0IjogeyJhZGRyZXNzIjogInNlY3JldDFtbWhoemNjbmRxcGx3cDlqdWo2ejNoeTBlYXFoNHBmMzk1ZTJteSIsICJzZW5kX2Ftb3VudCI6ICI1NTU1NTUiLCAiZGVzY3JpcHRpb24iOiAiYXBvY2FseXB0byByZWNlaXZlIHJlcXVlc3QiLCAidG9rZW4iOiB7ImFkZHJlc3MiOiAic2VjcmV0MThyNXN6bWE4aG05M3B2eDZsd3Bqd3l4cnV3MjdlMGs1N3RuY2Z5IiwgImNvbnRyYWN0X2hhc2giOiAiMzVGNURCMkJDNUNENTY4MTVEMTBDN0E1NjdENjgyN0JFQ0NCOEVBRjQ1QkMzRkEwMTY5MzBDNEE4MjA5RUE2OSJ9fX0=" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 8. Send payment
+
 * If sender sends the correct token and amount, the contract forwards payment to the receiver and sends the fee to the treasury.
 * Tx status updated to 3 (paid).
+
+| Name     | Type | Description                       | Optional |
+|----------|------|-----------------------------------|----------|
+| position | u32  | position of Tx in user's Tx array | no       |
 
 ``` sh
 secretcli tx compute execute secret18r5szma8hm93pvx6lwpjwyxruw27e0k57tncfy '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "555555", "msg": "eyJzZW5kX3BheW1lbnQiOiB7InBvc2l0aW9uIjogMH19" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 9. Cancel
+
 * via SSCRT
 * Either party can cancel the Tx and the fee is sent back to the creator.
 * Tx status updated to 2 (cancelled).
+
+| Name     | Type | Description                       | Optional |
+|----------|------|-----------------------------------|----------|
+| position | u32  | position of Tx in user's Tx array | no       |
 
 ``` sh
 secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "0", "msg": "eyJjYW5jZWwiOiB7InBvc2l0aW9uIjogMX19" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
