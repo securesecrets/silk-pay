@@ -1,8 +1,9 @@
 use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
+use crate::error::overflow_occurred;
 use crate::transaction_history::{
     get_txs, store_txs, update_tx, verify_txs, verify_txs_for_cancel,
-    verify_txs_for_confirm_address,
+    verify_txs_for_confirm_address, TxClass, Tx,
 };
 use crate::{
     msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg},
@@ -14,6 +15,8 @@ use cosmwasm_std::{
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
+
+use cosmwasm_math_compat::Uint128 as checkedUint128;
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -120,6 +123,53 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             token,
         ),
         ReceiveMsg::SendPayment { position } => send_payment(deps, &env, from, amount, position),
+        ReceiveMsg::CreateRecurringSendRequest { 
+            address,
+            description, 
+            token, 
+            send_amount, 
+            start_time,
+            interval, 
+            end_time,
+            allowance_enabled
+        } => create_recurring_send_request(
+            deps,
+            &env,
+            from,
+            amount,
+            address,
+            description,
+            token,
+            send_amount,
+            start_time,
+            interval,
+            end_time,
+            allowance_enabled
+        ),
+        ReceiveMsg::CreateRecurringReceiveRequest { 
+            address, 
+            description, 
+            token, 
+            receive_amount, 
+            start_time,
+            interval, 
+            end_time
+        } => create_recurring_receive_request(
+            deps,
+            &env,
+            from,
+            amount,
+            address,
+            description,
+            token,
+            receive_amount,
+            start_time,
+            interval,
+            end_time,
+        ),
+        ReceiveMsg::FulfillRecurringPayment { position } => fulfill_recurring_payment(deps, &env, from, amount, position),
+        ReceiveMsg::AcceptRecurringPayment { position } => accept_recurring_payment(deps, &env, from, amount, position),
+        ReceiveMsg::ConfirmRecurringAddress { position } => confirm_recurring_address(deps, &env, from, amount, position)
     };
     pad_response(response)
 }
@@ -348,6 +398,11 @@ fn create_receive_request<S: Storage, A: Api, Q: Querier>(
         description,
         1,
         &env.block,
+        None,
+        None,
+        None,
+        None,
+        None
     )?;
     let mut messages: Vec<CosmosMsg> = vec![];
     let register_token_msg: Option<CosmosMsg> =
@@ -393,6 +448,11 @@ fn create_send_request<S: Storage, A: Api, Q: Querier>(
         description,
         0,
         &env.block,
+        None,
+        None,
+        None,
+        None,
+        None
     )?;
     let mut messages: Vec<CosmosMsg> = vec![];
     let register_token_msg: Option<CosmosMsg> =
@@ -405,6 +465,296 @@ fn create_send_request<S: Storage, A: Api, Q: Querier>(
         messages,
         log: vec![],
         data: None,
+    })
+}
+
+fn create_recurring_send_request<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
+    address: HumanAddr,
+    description: Option<String>,
+    token: SecretContract,
+    send_amount: Uint128,
+    start_time: u64,
+    interval: u64,
+    end_time: u64,
+    allowance_enabled: bool
+) -> StdResult<HandleResponse> {
+    let config: Config = TypedStore::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    correct_amount_of_token(
+        amount, 
+        config.fee, 
+        env.message.sender.clone(), 
+        config.sscrt.address,    
+    )?;
+    let now = env.block.time;
+    store_txs(
+        &mut deps.storage, 
+        config.fee, 
+        &deps.api.canonical_address(&from)?, 
+        &deps.api.canonical_address(&address)?, 
+        from, 
+        send_amount, 
+        token.clone(), 
+        description, 
+        4, 
+        &env.block,
+        Some(start_time),
+        Some(interval),
+        Some(start_time),
+        Some(end_time),
+        Some(allowance_enabled)
+    )?;
+    let mut messages: Vec<CosmosMsg> = vec![];
+    let register_token_msg: Option<CosmosMsg> = 
+        register_token(&mut deps.storage, env.contract_code_hash.clone(), token)?;
+    if register_token_msg.is_some() {
+        messages.push(register_token_msg.unwrap())
+    }
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![],
+        data: None,
+    })
+}
+
+fn create_recurring_receive_request<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
+    address: HumanAddr,
+    description: Option<String>,
+    token: SecretContract,
+    send_amount: Uint128,
+    start_time: u64,
+    interval: u64,
+    end_time: u64
+) -> StdResult<HandleResponse> {
+    let config: Config = TypedStore::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    correct_amount_of_token(
+    amount, 
+    config.fee, 
+    env.message.sender.clone(), 
+    config.sscrt.address,    
+    )?;
+    let now = env.block.time;
+    store_txs(
+        &mut deps.storage, 
+        config.fee, 
+        &deps.api.canonical_address(&address)?, 
+        &deps.api.canonical_address(&from)?, 
+        from, 
+        send_amount, 
+        token.clone(), 
+        description, 
+        5, 
+        &env.block,
+        Some(start_time),
+        Some(interval),
+        Some(start_time),
+        Some(end_time),
+        Some(false)
+    )?;
+    let mut messages: Vec<CosmosMsg> = vec![];
+    let register_token_msg: Option<CosmosMsg> =
+        register_token(&mut deps.storage, env.contract_code_hash.clone(), token)?;
+    if register_token_msg.is_some() {
+        messages.push(register_token_msg.unwrap())
+    }
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![],
+        data: None,
+    })
+}
+
+fn fulfill_recurring_payment<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
+    position: u32,
+) -> StdResult<HandleResponse> {
+    let (mut from_tx, mut to_tx) = verify_txs(
+        &deps.api,
+        &mut deps.storage,
+        &deps.api.canonical_address(&from)?,
+        amount,
+        position,
+        4,
+        env.message.sender.clone(),
+    )?;
+
+    let mut messages: Vec<CosmosMsg> = vec![];
+
+    match from_tx.class {
+        TxClass::SingleTx {  } => {
+            return Err(todo!())
+        }
+        TxClass::RecurringTx { start_time, interval, last_time_balanced, end_time, allowance_enabled } => {
+            let (total_outstanding, last_time_updated, last) = calculate_total_outstanding(&env, start_time, interval, last_time_balanced, end_time, from_tx.amount)?;
+            
+            let update = TxClass::RecurringTx { start_time, interval, last_time_balanced: last_time_updated, end_time };
+            from_tx.class = update.clone();
+            to_tx.class = update;
+
+            // If it's the last payment interval/the end_time has come and gone, then set the status to 3 and close it out.
+            if last {
+                from_tx.status = 3;
+                to_tx.status = 3;
+            }
+
+            let config: Config = TypedStore::attach(&mut deps.storage)
+            .load(CONFIG_KEY)
+            .unwrap();
+
+            // Make sure the user sent the right amount, based off calculated outstanding amount.
+            correct_amount_of_token(amount, total_outstanding, env.message.sender.clone(), config.sscrt.address.clone());
+
+            update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx.clone())?;
+            update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx)?;
+
+
+            messages.push(snip20::transfer_msg(
+                config.treasury_address,
+                from_tx.fee,
+                None,
+                BLOCK_SIZE,
+                config.sscrt.contract_hash,
+                config.sscrt.address,
+            )?);
+            messages.push(snip20::transfer_msg(
+                deps.api.human_address(&from_tx.to)?,
+                from_tx.amount,
+                None,
+                BLOCK_SIZE,
+                from_tx.token.contract_hash,
+                env.message.sender.clone(),
+            )?);
+        }
+    }
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![],
+        data: None,
+    })
+}
+
+fn accept_recurring_payment<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
+    position: u32,
+) -> StdResult<HandleResponse> {
+    let (mut from_tx, mut to_tx) = verify_txs(
+        &deps.api,
+        &mut deps.storage,
+        &deps.api.canonical_address(&from)?,
+        amount,
+        position,
+        5,
+        env.message.sender.clone(),
+    )?;
+
+    let mut messages: Vec<CosmosMsg> = vec![];
+
+    match from_tx.class {
+        TxClass::SingleTx {  } => {
+            return Err(todo!())
+        }
+        TxClass::RecurringTx { start_time, interval, last_time_balanced, end_time } => {
+            let (total_outstanding, last_time_updated, last) = calculate_total_outstanding(&env, start_time, interval, last_time_balanced, end_time, from_tx.amount)?;
+            
+            let update = TxClass::RecurringTx { start_time, interval, last_time_balanced: last_time_updated, end_time };
+            from_tx.class = update.clone();
+            to_tx.class = update;
+
+            // If it's the last payment interval/the end_time has come and gone, then set the status to 3 and close it out.
+            if last {
+                from_tx.status = 3;
+                to_tx.status = 3;
+            }
+
+            update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx.clone())?;
+            update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx)?;
+            let config: Config = TypedStore::attach(&mut deps.storage)
+                .load(CONFIG_KEY)
+                .unwrap();
+
+            messages.push(snip20::transfer_msg(
+                config.treasury_address,
+                from_tx.fee,
+                None,
+                BLOCK_SIZE,
+                config.sscrt.contract_hash,
+                config.sscrt.address,
+            )?);
+            messages.push(snip20::transfer_from_msg(
+                deps.api.human_address(&from_tx.from)?,
+                deps.api.human_address(&from_tx.to)?,
+                total_outstanding,
+                None,
+                BLOCK_SIZE,
+                from_tx.token.contract_hash,
+                env.message.sender.clone(),
+            )?);
+        }
+    }
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![],
+        data: None,
+    })
+}
+
+fn confirm_recurring_address<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
+    position: u32,
+) -> StdResult<HandleResponse> {
+    let config: Config = TypedStoreMut::attach(&mut deps.storage)
+        .load(CONFIG_KEY)
+        .unwrap();
+    correct_amount_of_token(
+        amount,
+        Uint128(0),
+        env.message.sender.clone(),
+        config.sscrt.address,
+    )?;
+
+    let (mut from_tx, mut to_tx) = verify_txs_for_confirm_address(
+        &deps.api,
+        &mut deps.storage,
+        &deps.api.canonical_address(&from)?,
+        position,
+    )?;
+
+    // Update Txs
+    from_tx.status = 1;
+    to_tx.status = 1;
+    update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx)?;
+    update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx)?;
+
+    let messages = vec![];
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![],
+        data: None
     })
 }
 
@@ -521,6 +871,52 @@ fn update_treasury_address<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/**
+ * Calculate total outstanding based off of elapsed time since the last time balanced.
+ * if now > end_time, functional_time = end_time
+ * (functional_time - last_time_balanced)/(interval) = elapsed_intervals
+ * (elapsed_intervals * amount) = total_outstanding
+ * last_time_balanced = now
+ * return (total_outstanding, last_time_balanced)
+ */
+fn calculate_total_outstanding(
+    env: &Env,
+    start_time: u64,
+    interval: u64,
+    mut last_time_balanced: u64,
+    end_time: u64,
+    amount: Uint128,
+) -> StdResult<(Uint128, u64, bool)> {
+    let mut last = false;
+    let now = env.block.time;
+    let mut functional_time = now;
+    if now > end_time {
+        functional_time = end_time;
+        last = true;
+    }
+
+    // (functional_time - last_time_balanced)/(interval) = elapsed_intervals
+    // let mut elapsed_intervals: u64 = 0;
+    // match functional_time.checked_sub(last_time_balanced) {
+    //     None => return Err(overflow_occurred()),
+    //     Some(x) => {
+    //         match x.checked_div(interval) {
+    //             None => return Err(overflow_occurred()),
+    //             Some(t) => {
+    //                 elapsed_intervals = t;
+    //             }
+    //         }
+    //     }
+    // }
+    let mut elapsed_intervals = checkedUint128::new(functional_time.checked_sub(last_time_balanced).ok_or(overflow_occurred())?.into());
+    elapsed_intervals = elapsed_intervals.checked_div(checkedUint128::new(interval.into())).unwrap();
+
+    // (elapsed_intervals * amount) = total_outstanding
+    let total_outstanding = elapsed_intervals.checked_mul(checkedUint128::new(amount.u128())).unwrap();
+    last_time_balanced = now;
+    return Ok((Uint128(total_outstanding.u128()), last_time_balanced, last));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,7 +982,11 @@ mod tests {
     }
 
     fn mock_user_address() -> HumanAddr {
-        HumanAddr::from("gary")
+        HumanAddr::from("alice")
+    }
+
+    fn mock_other_user_address() -> HumanAddr {
+        HumanAddr::from("bob")
     }
 
     // === INIT TEST ===
@@ -1139,6 +1539,7 @@ mod tests {
                 status: 1,
                 block_time: env.block.time,
                 block_height: env.block.height,
+                class: TxClass::SingleTx {  }
             }
         );
         assert_eq!(
@@ -1159,6 +1560,7 @@ mod tests {
                 status: 1,
                 block_time: env.block.time,
                 block_height: env.block.height,
+                class: TxClass::SingleTx {  }
             }
         );
     }
@@ -1279,6 +1681,7 @@ mod tests {
                 status: 0,
                 block_time: env.block.time,
                 block_height: env.block.height,
+                class: TxClass::SingleTx {  }
             }
         );
         assert_eq!(
@@ -1299,6 +1702,7 @@ mod tests {
                 status: 0,
                 block_time: env.block.time,
                 block_height: env.block.height,
+                class: TxClass::SingleTx {  }
             }
         );
     }
@@ -1590,5 +1994,72 @@ mod tests {
         handle_result.unwrap();
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
         assert_eq!(config.treasury_address, new_treasury_address)
+    }
+
+    #[test]
+    fn test_create_recurring_send_request() {
+        let (_init_result, mut deps) = init_helper();
+        let env = mock_env(mock_user_address(), &[]);
+        let description = Some("Mercy".to_string());
+
+        // when pending address tx exists
+        let send_amount: Uint128 = Uint128(555_555);
+        let receive_msg = ReceiveMsg::CreateRecurringSendRequest {
+            address: mock_contract_initiator_address(),
+            send_amount: send_amount,
+            description: description.clone(),
+            token: mock_silk(),
+            start_time: 1_571_797_419,
+            interval: 5,
+            end_time: 1_571_797_479
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_fee(),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
+        handle_result.unwrap();
+
+        // Doesn't allow incorrect token to be sent to fulfill recurring payment
+        let receive_msg = ReceiveMsg::FulfillRecurringPayment { position: 0 };
+        let handle_msg = HandleMsg::Receive { sender: mock_user_address(), from: mock_user_address(), amount: Uint128(555_555), msg: to_binary(&receive_msg).unwrap() };
+        let handle_result = handle(&mut deps, mock_env(mock_sscrt().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap_err(), 
+            StdError::GenericErr {
+                msg: "Wrong token received.".to_string(),
+                backtrace: None
+            }
+        );
+
+        // No transaction at position 1 yet, so fails
+        let receive_msg = ReceiveMsg::FulfillRecurringPayment { position: 1 };
+        let handle_msg = HandleMsg::Receive { sender: mock_user_address(), from: mock_user_address(), amount: Uint128(555_555), msg: to_binary(&receive_msg).unwrap() };
+        let handle_result = handle(&mut deps, mock_env(mock_silk().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap_err(), 
+            StdError::GenericErr {
+                msg: "AppendStorage access out of bounds".to_string(),
+                backtrace: None
+            }
+        );
+
+        // Actual transaction start
+        let receive_msg = ReceiveMsg::FulfillRecurringPayment { position: 0 };
+        let handle_msg = HandleMsg::Receive { sender: mock_user_address(), from: mock_user_address(), amount: Uint128(555_555), msg: to_binary(&receive_msg).unwrap() };
+        let handle_result_unwrapped = handle(&mut deps, mock_env(mock_silk().address, &[]), handle_msg).unwrap();
+        assert_eq!(
+            handle_result_unwrapped.messages,
+            vec![snip20::register_receive_msg(
+                mock_env(mock_sscrt().address, &[]).contract_code_hash,
+                None,
+                BLOCK_SIZE,
+                mock_silk().contract_hash,
+                mock_silk().address,
+            )
+            .unwrap()]
+        );
     }
 }

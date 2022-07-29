@@ -1,6 +1,7 @@
 mod asset;
 mod authorize;
 mod constants;
+mod error;
 pub mod contract;
 pub mod msg;
 pub mod state;

@@ -44,3 +44,4 @@ snafu = { version = "0.6.3" }
 secret-toolkit = { git = "https://github.com/enigmampc/secret-toolkit" }
 sha2 = { version = "0.9.1", default-features = false }
 subtle = { version = "2.2.3", default-features = false }
+cosmwasm-math-compat = { git = "https://github.com/securesecrets/shade.git", version = "0.1.0" }

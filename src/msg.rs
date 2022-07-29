@@ -32,7 +32,15 @@ pub enum HandleMsg {
         address: HumanAddr,
     },
 }
-
+/**
+ * Tx status enumeration:
+ * 0 - Single Send Request
+ * 1 - Single Receive Request
+ * 2 - Cancelled
+ * 3 - Completed
+ * 4 - Active Recurring Send Request
+ * 5 - Active Recurring Receive Request
+ */
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
@@ -55,6 +63,30 @@ pub enum ReceiveMsg {
         token: SecretContract,
     },
     SendPayment {
+        position: u32,
+    },
+    CreateRecurringSendRequest {
+        address: HumanAddr,
+        description: Option<String>,
+        token: SecretContract,
+        send_amount: Uint128,
+        start_time: u64,
+        interval: u64,
+        end_time: u64,
+    },
+    CreateRecurringReceiveRequest {
+        address: HumanAddr,
+        description: Option<String>,
+        token: SecretContract,
+        receive_amount: Uint128,
+        start_time: u64,
+        interval: u64,
+        end_time: u64,
+    },
+    FulfillRecurringPayment {
+        position: u32,
+    },
+    AcceptRecurringPayment {
         position: u32,
     },
 }

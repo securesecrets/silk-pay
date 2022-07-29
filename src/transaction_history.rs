@@ -22,6 +22,11 @@ pub struct HumanizedTx {
     pub status: u8,
     pub block_time: u64,
     pub block_height: u64,
+    pub start_time: Option<u64>,
+    pub interval: Option<u64>,
+    pub last_time_balanced: Option<u64>,
+    pub end_time: Option<u64>,
+    pub allowance_enabled: Option<bool>
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq)]
@@ -39,20 +44,62 @@ pub struct Tx {
     pub status: u8,
     pub block_time: u64,
     pub block_height: u64,
+    pub class: TxClass
 }
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq)]
+pub enum TxClass{
+    SingleTx{ },
+    RecurringTx{
+        start_time: u64,
+        interval: u64,
+        last_time_balanced: u64,
+        end_time: u64,
+        allowance_enabled: bool
+    },
+}
+
 impl Tx {
     fn into_humanized<A: Api>(self, api: &A) -> StdResult<HumanizedTx> {
-        Ok(HumanizedTx {
-            position: self.position,
-            from: api.human_address(&self.from)?,
-            to: api.human_address(&self.to)?,
-            amount: self.amount,
-            token: self.token,
-            description: self.description,
-            status: self.status,
-            block_time: self.block_time,
-            block_height: self.block_height,
-        })
+        match self.class {
+            TxClass::SingleTx {} => {
+                Ok(HumanizedTx {
+                    position: self.position,
+                    from: api.human_address(&self.from)?,
+                    to: api.human_address(&self.to)?,
+                    amount: self.amount,
+                    token: self.token,
+                    description: self.description,
+                    status: self.status,
+                    block_time: self.block_time,
+                    block_height: self.block_height,
+                    start_time: None,
+                    interval: None,
+                    last_time_balanced: None,
+                    end_time: None,
+                    allowance_enabled: None,
+                })
+            },
+            TxClass::RecurringTx { start_time, interval, last_time_balanced, end_time, allowance_enabled} => {
+                Ok(HumanizedTx {
+                    position: self.position,
+                    from: api.human_address(&self.from)?,
+                    to: api.human_address(&self.to)?,
+                    amount: self.amount,
+                    token: self.token,
+                    description: self.description,
+                    status: self.status,
+                    block_time: self.block_time,
+                    block_height: self.block_height,
+                    start_time: Some(start_time),
+                    interval: Some(interval),
+                    last_time_balanced: Some(last_time_balanced),
+                    end_time: Some(end_time),
+                    allowance_enabled: Some(allowance_enabled)
+                })
+            }
+        }
+        
     }
 }
 
@@ -101,6 +148,11 @@ pub fn store_txs<S: Storage>(
     description: Option<String>,
     status: u8,
     block: &cosmwasm_std::BlockInfo,
+    start_time: Option<u64>,
+    interval: Option<u64>,
+    last_time_balanced: Option<u64>,
+    end_time: Option<u64>,
+    allowance_enabled: Option<bool>
 ) -> StdResult<()> {
     if from == to {
         return Err(StdError::generic_err(
@@ -110,6 +162,21 @@ pub fn store_txs<S: Storage>(
 
     let from_position = get_next_position(store, from)?;
     let to_position = get_next_position(store, to)?;
+
+    let mut class = TxClass::SingleTx {  };
+
+    if let Some(start_time) = start_time {
+        if let Some(interval) = interval {
+            if let Some(last_time_balanced) = last_time_balanced {
+                if let Some(end_time) = end_time {
+                    if let Some(allowance_enabled) = allowance_enabled {
+                        class = TxClass::RecurringTx { start_time, interval, last_time_balanced, end_time, allowance_enabled };
+                    }
+                }
+            }
+        }
+    } 
+
     let from_tx = Tx {
         position: from_position,
         other_storage_position: to_position,
@@ -123,6 +190,7 @@ pub fn store_txs<S: Storage>(
         status: status,
         block_time: block.time,
         block_height: block.height,
+        class
     };
     append_tx(store, &from_tx, from)?;
     let mut to_tx = from_tx;
@@ -174,6 +242,29 @@ pub fn verify_txs<A: Api, S: Storage>(
         token_address,
         to_tx.token.address.clone(),
     )?;
+    authorize(api.human_address(&to_tx.from)?, api.human_address(address)?)?;
+    if to_tx.status != status {
+        return Err(StdError::generic_err(
+            "Tx status at that position is incorrect.",
+        ));
+    }
+
+    Ok((from_tx, to_tx))
+}
+
+// Verify the Tx and its counter Tx for recurring status
+pub fn verify_txs_for_recurring_payment<A: Api, S: Storage>(
+    api: &A,
+    store: &mut S,
+    address: &CanonicalAddr,
+    amount: Uint128,
+    position: u32,
+    status: u8,
+    token_address: HumanAddr,
+) -> StdResult<(Tx, Tx)> {
+    let from_tx = tx_at_position(store, address, position)?;
+    let to_tx = tx_at_position(store, &&from_tx.to, from_tx.other_storage_position)?;
+    
     authorize(api.human_address(&to_tx.from)?, api.human_address(address)?)?;
     if to_tx.status != status {
         return Err(StdError::generic_err(
