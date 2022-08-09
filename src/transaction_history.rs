@@ -1,10 +1,12 @@
 use crate::authorize::authorize;
 use crate::constants::PREFIX_TXS;
 use crate::contract::correct_amount_of_token;
+use crate::error::*;
 use crate::state::SecretContract;
 use cosmwasm_std::{
-    Api, CanonicalAddr, HumanAddr, ReadonlyStorage, StdError, StdResult, Storage, Uint128,
+    Api, CanonicalAddr, HumanAddr, ReadonlyStorage, StdError, StdResult, Storage,
 };
+use cosmwasm_math_compat::Uint128;
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 use schemars::JsonSchema;
 use secret_toolkit::storage::{AppendStore, AppendStoreMut};
@@ -244,9 +246,7 @@ pub fn verify_txs<A: Api, S: Storage>(
     )?;
     authorize(api.human_address(&to_tx.from)?, api.human_address(address)?)?;
     if to_tx.status != status {
-        return Err(StdError::generic_err(
-            "Tx status at that position is incorrect.",
-        ));
+        return Err(tx_not_confirmed(to_tx.status))
     }
 
     Ok((from_tx, to_tx))
@@ -267,9 +267,7 @@ pub fn verify_txs_for_recurring_payment<A: Api, S: Storage>(
     
     authorize(api.human_address(&to_tx.from)?, api.human_address(address)?)?;
     if to_tx.status != status {
-        return Err(StdError::generic_err(
-            "Tx status at that position is incorrect.",
-        ));
+        return Err(tx_not_confirmed(to_tx.status))
     }
 
     Ok((from_tx, to_tx))
@@ -283,10 +281,10 @@ pub fn verify_txs_for_cancel<S: Storage>(
     let from_tx = tx_at_position(store, address, position)?;
     let to_tx = tx_at_position(store, &from_tx.to, from_tx.other_storage_position)?;
     if to_tx.status == 2 {
-        return Err(StdError::generic_err("Tx already cancelled."));
+        return Err(tx_already_cancelled(position));
     }
     if to_tx.status == 3 {
-        return Err(StdError::generic_err("Tx already finalized."));
+        return Err(tx_already_completed(position));
     }
 
     Ok((from_tx, to_tx))
@@ -297,17 +295,65 @@ pub fn verify_txs_for_confirm_address<A: Api, S: Storage>(
     store: &mut S,
     address: &CanonicalAddr,
     position: u32,
+    recurring: bool,
 ) -> StdResult<(Tx, Tx)> {
     let to_tx = tx_at_position(store, address, position)?;
     let from_tx = tx_at_position(store, &to_tx.from, to_tx.other_storage_position)?;
     authorize(api.human_address(&to_tx.to)?, api.human_address(address)?)?;
-    if to_tx.status != 0 {
-        return Err(StdError::generic_err(
-            "Tx not waiting for address confirmation.",
-        ));
+    match recurring {
+        false => {
+            if to_tx.status != 0 {
+                return Err(tx_not_at_confirmation_stage(to_tx.status))
+
+            }        
+        }
+        true => {
+            if to_tx.status != 4 {
+                return Err(tx_not_at_confirmation_stage(to_tx.status))
+            }        
+        }
     }
 
     Ok((from_tx, to_tx))
+}
+
+// Checking that:
+// start_time + (interval * SOME_POSITIVE_INTEGER) == end_time
+// num_intervals = SOME_POSITIVE_INTEGER
+// Amount * num intervals == total_amount
+pub fn verify_recurring_tx_parameters(
+    amount: Uint128,
+    total_amount: Uint128,
+    start_time: u64,
+    interval: u64,
+    end_time: u64,
+    now: u64,
+    config_end_time_limit: u64,
+) -> StdResult<()> {
+    if config_end_time_limit < end_time || end_time<= now {
+        return Err(invalid_end_time(end_time, now, config_end_time_limit))
+    }
+    if start_time>=end_time {
+        return Err(invalid_start_time(start_time, end_time))
+    }
+    let diff = end_time - start_time;
+    if diff%interval == 0 {
+        let num_intervals = diff/interval + 1; // Accounting for the first payment at start_time
+        match amount.checked_mul(Uint128::from(num_intervals)) {
+            Ok(calc_total) => {
+                if calc_total == total_amount {
+                    Ok(())
+                } else {
+                    Err(incorrect_total_amount(amount, num_intervals, total_amount))
+                }
+            }
+            Err(e) => {
+                Err(overflow_occurred())
+            }
+        }
+    } else {
+        return Err(cannot_create_even_intervals(diff, interval))
+    }
 }
 
 fn append_tx<S: Storage>(store: &mut S, tx: &Tx, for_address: &CanonicalAddr) -> StdResult<()> {

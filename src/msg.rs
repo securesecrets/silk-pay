@@ -1,6 +1,7 @@
 use crate::state::SecretContract;
 use crate::transaction_history::HumanizedTx;
-use cosmwasm_std::{Binary, HumanAddr, Uint128};
+use cosmwasm_std::{Binary, HumanAddr};
+use cosmwasm_math_compat::Uint128;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +11,7 @@ pub struct InitMsg {
     pub shade: SecretContract,
     pub sscrt: SecretContract,
     pub treasury_address: HumanAddr,
+    pub end_time_limit: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -34,12 +36,12 @@ pub enum HandleMsg {
 }
 /**
  * Tx status enumeration:
- * 0 - Single Send Request
- * 1 - Single Receive Request
+ * 0 - Unconfirmed Single Send Request
+ * 1 - Confirmed Single Send Request, New Receive Request
  * 2 - Cancelled
  * 3 - Completed
- * 4 - Active Recurring Send Request
- * 5 - Active Recurring Receive Request
+ * 4 - Unconfirmed Recurring Send Request
+ * 5 - Confirmed and Active Recurring Send Request, New Recurring Receive Request
  */
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -73,6 +75,8 @@ pub enum ReceiveMsg {
         start_time: u64,
         interval: u64,
         end_time: u64,
+        total_amount: Uint128,
+        allowance_enabled: bool
     },
     CreateRecurringReceiveRequest {
         address: HumanAddr,
@@ -89,6 +93,9 @@ pub enum ReceiveMsg {
     AcceptRecurringPayment {
         position: u32,
     },
+    ConfirmRecurringAddress {
+        position: u32,
+    }
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]

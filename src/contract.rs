@@ -1,9 +1,9 @@
 use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
-use crate::error::overflow_occurred;
+use crate::error::*;
 use crate::transaction_history::{
     get_txs, store_txs, update_tx, verify_txs, verify_txs_for_cancel,
-    verify_txs_for_confirm_address, TxClass, Tx,
+    verify_txs_for_confirm_address, TxClass, Tx, verify_recurring_tx_parameters
 };
 use crate::{
     msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg},
@@ -11,12 +11,14 @@ use crate::{
 };
 use cosmwasm_std::{
     from_binary, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, Querier, StdError, StdResult, Storage, Uint128,
+    InitResponse, Querier, StdError, StdResult, Storage,
 };
+use cosmwasm_math_compat::Uint128;
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
 
 use cosmwasm_math_compat::Uint128 as checkedUint128;
+use sha2::digest::generic_array::typenum::private::IsEqualPrivate;
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -31,6 +33,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         shade: msg.shade.clone(),
         sscrt: msg.sscrt.clone(),
         treasury_address: msg.treasury_address,
+        end_time_limit: msg.end_time_limit,
     };
     config_store.store(CONFIG_KEY, &config)?;
 
@@ -131,6 +134,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             start_time,
             interval, 
             end_time,
+            total_amount,
             allowance_enabled
         } => create_recurring_send_request(
             deps,
@@ -144,6 +148,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             start_time,
             interval,
             end_time,
+            total_amount,
             allowance_enabled
         ),
         ReceiveMsg::CreateRecurringReceiveRequest { 
@@ -186,7 +191,7 @@ fn confirm_address<S: Storage, A: Api, Q: Querier>(
         .unwrap();
     correct_amount_of_token(
         amount,
-        Uint128(0),
+        Uint128::zero(),
         env.message.sender.clone(),
         config.sscrt.address,
     )?;
@@ -196,6 +201,7 @@ fn confirm_address<S: Storage, A: Api, Q: Querier>(
         &mut deps.storage,
         &deps.api.canonical_address(&from)?,
         position,
+        false
     )?;
 
     // Update Txs
@@ -223,7 +229,7 @@ fn cancel<S: Storage, A: Api, Q: Querier>(
         .unwrap();
     correct_amount_of_token(
         amount,
-        Uint128(0),
+        Uint128::zero(),
         env.message.sender.clone(),
         config.sscrt.address.clone(),
     )?;
@@ -236,7 +242,7 @@ fn cancel<S: Storage, A: Api, Q: Querier>(
     let mut messages: Vec<CosmosMsg> = vec![];
     messages.push(snip20::transfer_msg(
         from_tx.creator.clone(),
-        from_tx.fee,
+        from_tx.fee.u128().into(),
         None,
         BLOCK_SIZE,
         config.sscrt.contract_hash,
@@ -282,7 +288,7 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
     let mut messages: Vec<CosmosMsg> = vec![];
     messages.push(snip20::transfer_msg(
         config.treasury_address,
-        from_tx.fee,
+        from_tx.fee.u128().into(),
         None,
         BLOCK_SIZE,
         config.sscrt.contract_hash,
@@ -290,7 +296,7 @@ fn send_payment<S: Storage, A: Api, Q: Querier>(
     )?);
     messages.push(snip20::transfer_msg(
         deps.api.human_address(&from_tx.to)?,
-        from_tx.amount,
+        from_tx.amount.u128().into(),
         None,
         BLOCK_SIZE,
         from_tx.token.contract_hash,
@@ -480,6 +486,7 @@ fn create_recurring_send_request<S: Storage, A: Api, Q: Querier>(
     start_time: u64,
     interval: u64,
     end_time: u64,
+    total_amount: Uint128,
     allowance_enabled: bool
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&mut deps.storage)
@@ -492,6 +499,15 @@ fn create_recurring_send_request<S: Storage, A: Api, Q: Querier>(
         config.sscrt.address,    
     )?;
     let now = env.block.time;
+    verify_recurring_tx_parameters(
+        send_amount, 
+        total_amount, 
+        start_time, 
+        interval, 
+        end_time, 
+        now, 
+        config.end_time_limit);
+
     store_txs(
         &mut deps.storage, 
         config.fee, 
@@ -598,12 +614,12 @@ fn fulfill_recurring_payment<S: Storage, A: Api, Q: Querier>(
 
     match from_tx.class {
         TxClass::SingleTx {  } => {
-            return Err(todo!())
+            return Err(tx_not_recurring())
         }
         TxClass::RecurringTx { start_time, interval, last_time_balanced, end_time, allowance_enabled } => {
             let (total_outstanding, last_time_updated, last) = calculate_total_outstanding(&env, start_time, interval, last_time_balanced, end_time, from_tx.amount)?;
             
-            let update = TxClass::RecurringTx { start_time, interval, last_time_balanced: last_time_updated, end_time };
+            let update = TxClass::RecurringTx { start_time, interval, last_time_balanced: last_time_updated, end_time, allowance_enabled };
             from_tx.class = update.clone();
             to_tx.class = update;
 
@@ -618,7 +634,7 @@ fn fulfill_recurring_payment<S: Storage, A: Api, Q: Querier>(
             .unwrap();
 
             // Make sure the user sent the right amount, based off calculated outstanding amount.
-            correct_amount_of_token(amount, total_outstanding, env.message.sender.clone(), config.sscrt.address.clone());
+            correct_amount_of_token(amount, total_outstanding, env.message.sender.clone(), config.sscrt.address.clone())?;
 
             update_tx(&mut deps.storage, &from_tx.from.clone(), from_tx.clone())?;
             update_tx(&mut deps.storage, &to_tx.to.clone(), to_tx)?;
@@ -626,7 +642,7 @@ fn fulfill_recurring_payment<S: Storage, A: Api, Q: Querier>(
 
             messages.push(snip20::transfer_msg(
                 config.treasury_address,
-                from_tx.fee,
+                from_tx.fee.u128().into(),
                 None,
                 BLOCK_SIZE,
                 config.sscrt.contract_hash,
@@ -634,7 +650,7 @@ fn fulfill_recurring_payment<S: Storage, A: Api, Q: Querier>(
             )?);
             messages.push(snip20::transfer_msg(
                 deps.api.human_address(&from_tx.to)?,
-                from_tx.amount,
+                from_tx.amount.u128().into(),
                 None,
                 BLOCK_SIZE,
                 from_tx.token.contract_hash,
@@ -671,12 +687,12 @@ fn accept_recurring_payment<S: Storage, A: Api, Q: Querier>(
 
     match from_tx.class {
         TxClass::SingleTx {  } => {
-            return Err(todo!())
+            return Err(tx_not_recurring())
         }
-        TxClass::RecurringTx { start_time, interval, last_time_balanced, end_time } => {
+        TxClass::RecurringTx { start_time, interval, last_time_balanced, end_time, allowance_enabled } => {
             let (total_outstanding, last_time_updated, last) = calculate_total_outstanding(&env, start_time, interval, last_time_balanced, end_time, from_tx.amount)?;
             
-            let update = TxClass::RecurringTx { start_time, interval, last_time_balanced: last_time_updated, end_time };
+            let update = TxClass::RecurringTx { start_time, interval, last_time_balanced: last_time_updated, end_time, allowance_enabled };
             from_tx.class = update.clone();
             to_tx.class = update;
 
@@ -694,7 +710,7 @@ fn accept_recurring_payment<S: Storage, A: Api, Q: Querier>(
 
             messages.push(snip20::transfer_msg(
                 config.treasury_address,
-                from_tx.fee,
+                from_tx.fee.u128().into(),
                 None,
                 BLOCK_SIZE,
                 config.sscrt.contract_hash,
@@ -703,7 +719,7 @@ fn accept_recurring_payment<S: Storage, A: Api, Q: Querier>(
             messages.push(snip20::transfer_from_msg(
                 deps.api.human_address(&from_tx.from)?,
                 deps.api.human_address(&from_tx.to)?,
-                total_outstanding,
+                total_outstanding.u128().into(),
                 None,
                 BLOCK_SIZE,
                 from_tx.token.contract_hash,
@@ -731,7 +747,7 @@ fn confirm_recurring_address<S: Storage, A: Api, Q: Querier>(
         .unwrap();
     correct_amount_of_token(
         amount,
-        Uint128(0),
+        Uint128::zero(),
         env.message.sender.clone(),
         config.sscrt.address,
     )?;
@@ -741,6 +757,7 @@ fn confirm_recurring_address<S: Storage, A: Api, Q: Querier>(
         &mut deps.storage,
         &deps.api.canonical_address(&from)?,
         position,
+        true
     )?;
 
     // Update Txs
@@ -914,7 +931,7 @@ fn calculate_total_outstanding(
     // (elapsed_intervals * amount) = total_outstanding
     let total_outstanding = elapsed_intervals.checked_mul(checkedUint128::new(amount.u128())).unwrap();
     last_time_balanced = now;
-    return Ok((Uint128(total_outstanding.u128()), last_time_balanced, last));
+    return Ok((total_outstanding, last_time_balanced, last));
 }
 
 #[cfg(test)]
@@ -936,12 +953,13 @@ mod tests {
             shade: mock_shade(),
             sscrt: mock_sscrt(),
             treasury_address: mock_treasury_address(),
+            end_time_limit: env.block.time // 1_571_797_419
         };
         (init(&mut deps, env, msg), deps)
     }
 
     fn mock_fee() -> Uint128 {
-        Uint128(1_000_000)
+        Uint128::new(1_000_000)
     }
 
     fn mock_silk() -> SecretContract {
@@ -1027,6 +1045,7 @@ mod tests {
                 shade: mock_shade(),
                 sscrt: mock_sscrt(),
                 treasury_address: mock_treasury_address(),
+                end_time_limit: 1_571_797_419 + 100
             }
         );
 
@@ -1104,7 +1123,7 @@ mod tests {
         let description = Some("Mercy".to_string());
 
         // when pending address confirmation
-        let send_amount: Uint128 = Uint128(555_555);
+        let send_amount: Uint128 = Uint128::new(555_555);
         let receive_msg = ReceiveMsg::CreateSendRequest {
             address: mock_contract_initiator_address(),
             send_amount: send_amount,
@@ -1124,7 +1143,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(5),
+            amount: Uint128::new(5),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
@@ -1140,7 +1159,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(0),
+            amount: Uint128::new(0),
             msg: to_binary(&receive_msg).unwrap(),
         };
         // == when user sends in a non-sscrt token
@@ -1170,7 +1189,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(0),
+            amount: Uint128::new(0),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result_unwrapped = handle(
@@ -1197,7 +1216,7 @@ mod tests {
             handle_result_unwrapped.messages,
             vec![snip20::transfer_msg(
                 from_tx.creator.clone(),
-                from_tx.fee,
+                from_tx.fee.u128().into(),
                 None,
                 BLOCK_SIZE,
                 config.sscrt.contract_hash,
@@ -1259,7 +1278,7 @@ mod tests {
             handle_result_unwrapped.messages,
             vec![snip20::transfer_msg(
                 from_tx.creator.clone(),
-                from_tx.fee,
+                from_tx.fee.u128().into(),
                 None,
                 BLOCK_SIZE,
                 config.sscrt.contract_hash,
@@ -1297,7 +1316,7 @@ mod tests {
         let description = Some("Mercy".to_string());
 
         // when send receive exists
-        let send_amount: Uint128 = Uint128(555_555);
+        let send_amount: Uint128 = Uint128::new(555_555);
         let receive_msg = ReceiveMsg::CreateSendRequest {
             address: mock_contract_initiator_address(),
             send_amount: send_amount,
@@ -1317,7 +1336,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(5),
+            amount: Uint128::new(5),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
@@ -1333,7 +1352,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(0),
+            amount: Uint128::new(0),
             msg: to_binary(&receive_msg).unwrap(),
         };
         // == when user sends in a non-sscrt token
@@ -1364,7 +1383,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(0),
+            amount: Uint128::new(0),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(
@@ -1383,7 +1402,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_contract_initiator_address(),
             from: mock_contract_initiator_address(),
-            amount: Uint128(0),
+            amount: Uint128::new(0),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result_unwrapped = handle(
@@ -1433,14 +1452,14 @@ mod tests {
         // when incorrect fee amount is sent in
         let receive_msg = ReceiveMsg::CreateReceiveRequest {
             address: mock_user_address(),
-            send_amount: Uint128(555555),
+            send_amount: Uint128::new(555555),
             description: description.clone(),
             token: mock_silk(),
         };
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(555),
+            amount: Uint128::new(555),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
@@ -1482,7 +1501,7 @@ mod tests {
         );
 
         // == when sender sets the receiver to somebody else
-        let send_amount: Uint128 = Uint128(555_555);
+        let send_amount: Uint128 = Uint128::new(555_555);
         let receive_msg = ReceiveMsg::CreateReceiveRequest {
             address: mock_contract_initiator_address(),
             send_amount: send_amount,
@@ -1574,14 +1593,14 @@ mod tests {
         // when incorrect fee amount is sent in
         let receive_msg = ReceiveMsg::CreateSendRequest {
             address: mock_user_address(),
-            send_amount: Uint128(555555),
+            send_amount: Uint128::new(555555),
             description: description.clone(),
             token: mock_silk(),
         };
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(555),
+            amount: Uint128::new(555),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
@@ -1623,7 +1642,7 @@ mod tests {
         );
 
         // == when sender sets the receiver to somebody else
-        let send_amount: Uint128 = Uint128(555_555);
+        let send_amount: Uint128 = Uint128::new(555_555);
         let receive_msg = ReceiveMsg::CreateSendRequest {
             address: mock_contract_initiator_address(),
             send_amount: send_amount,
@@ -1738,7 +1757,7 @@ mod tests {
         let description = Some("Mercy".to_string());
 
         // when pending address tx exists
-        let send_amount: Uint128 = Uint128(555_555);
+        let send_amount: Uint128 = Uint128::new(555_555);
         let receive_msg = ReceiveMsg::CreateSendRequest {
             address: mock_contract_initiator_address(),
             send_amount: send_amount,
@@ -1779,7 +1798,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(send_amount.u128() + 1),
+            amount: Uint128::new(send_amount.u128() + 1),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
@@ -1913,7 +1932,7 @@ mod tests {
             vec![
                 snip20::transfer_msg(
                     config.treasury_address,
-                    from_tx.fee,
+                    from_tx.fee.u128().into(),
                     None,
                     BLOCK_SIZE,
                     config.sscrt.contract_hash,
@@ -1922,7 +1941,7 @@ mod tests {
                 .unwrap(),
                 snip20::transfer_msg(
                     deps.api.human_address(&from_tx.to).unwrap(),
-                    from_tx.amount,
+                    from_tx.amount.u128().into(),
                     None,
                     BLOCK_SIZE,
                     from_tx.token.contract_hash,
@@ -1952,7 +1971,7 @@ mod tests {
     fn test_update_fee() {
         let (_init_result, mut deps) = init_helper();
         let env = mock_env(mock_user_address(), &[]);
-        let new_fee = Uint128(555);
+        let new_fee = Uint128::new(555);
 
         // when called by non-admin
         // * it raises an unauthorized error
@@ -2003,15 +2022,17 @@ mod tests {
         let description = Some("Mercy".to_string());
 
         // when pending address tx exists
-        let send_amount: Uint128 = Uint128(555_555);
+        let send_amount: Uint128 = Uint128::new(100_000);
         let receive_msg = ReceiveMsg::CreateRecurringSendRequest {
             address: mock_contract_initiator_address(),
             send_amount: send_amount,
             description: description.clone(),
             token: mock_silk(),
             start_time: 1_571_797_419,
-            interval: 5,
-            end_time: 1_571_797_479
+            interval: 10,
+            end_time: 1_571_797_479,
+            total_amount: Uint128::new(500_000),
+            allowance_enabled: false
         };
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),

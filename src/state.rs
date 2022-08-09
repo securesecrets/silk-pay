@@ -1,5 +1,6 @@
 use crate::constants::PREFIX_REGISTERED_TOKENS;
-use cosmwasm_std::{HumanAddr, ReadonlyStorage, StdResult, Storage, Uint128};
+use cosmwasm_std::{HumanAddr, ReadonlyStorage, StdResult, Storage};
+use cosmwasm_math_compat::Uint128;
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 use schemars::JsonSchema;
 use secret_toolkit::serialization::{Bincode2, Serde};
@@ -14,6 +15,7 @@ pub struct Config {
     pub shade: SecretContract,
     pub sscrt: SecretContract,
     pub treasury_address: HumanAddr,
+    pub end_time_limit: u64,
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]

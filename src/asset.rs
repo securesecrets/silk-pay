@@ -1,4 +1,5 @@
-use cosmwasm_std::{CanonicalAddr, HumanAddr, Uint128};
+use cosmwasm_std::{CanonicalAddr, HumanAddr};
+use cosmwasm_math_compat::Uint128;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
